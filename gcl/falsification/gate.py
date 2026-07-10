@@ -15,6 +15,7 @@ from gcl.falsification.checks import (
     check_compliance_action_valid,
     check_migration_target_available,
     check_prediction_confidence,
+    check_scale_magnitude_reasonable,
     check_shed_load_bounded,
     check_warmup_time_realistic,
 )
@@ -43,6 +44,16 @@ class FalsificationGate:
                 verdict=Verdict.FAILS,
                 failed_check="capacity_overcommit",
                 reasoning=capacity_fail,
+                evidence_ids=evidence_ids,
+            )
+
+        magnitude_fail = check_scale_magnitude_reasonable(action_step, evidence, constraints)
+        if magnitude_fail is not None:
+            return FalsificationResult(
+                action_id=action_id,
+                verdict=Verdict.FAILS,
+                failed_check="scale_magnitude_unreasonable",
+                reasoning=magnitude_fail,
                 evidence_ids=evidence_ids,
             )
 

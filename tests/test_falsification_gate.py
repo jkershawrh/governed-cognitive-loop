@@ -205,6 +205,27 @@ class TestFalsificationGate:
         assert result.verdict == Verdict.SURVIVES
 
     @pytest.mark.asyncio
+    async def test_scale_magnitude_unreasonable(self, gate):
+        """scale with replicas=100 should be rejected."""
+        action = _scale_action(replicas=100)
+        trajectory = make_trajectory(confidence=0.8)
+        evidence = []
+        with patch("gcl.falsification.gate.get_force_rules", return_value=True):
+            result = await gate.falsify(action, trajectory, [], evidence)
+        assert result.verdict == Verdict.FAILS
+        assert result.failed_check == "scale_magnitude_unreasonable"
+
+    @pytest.mark.asyncio
+    async def test_scale_magnitude_reasonable_passes(self, gate):
+        """scale with replicas=5 should pass this check."""
+        action = _scale_action(replicas=5)
+        trajectory = make_trajectory(confidence=0.8)
+        evidence = []
+        with patch("gcl.falsification.gate.get_force_rules", return_value=True):
+            result = await gate.falsify(action, trajectory, [], evidence)
+        assert result.verdict == Verdict.SURVIVES
+
+    @pytest.mark.asyncio
     async def test_evidence_ids_in_result(self, gate):
         action = _scale_action(replicas=5)
         trajectory = make_trajectory(confidence=0.8)

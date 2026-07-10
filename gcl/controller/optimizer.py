@@ -4,6 +4,7 @@ from typing import Optional
 
 import numpy as np
 
+from gcl.config import get_settings
 from gcl.domain.contracts import Constraint, TrajectoryPoint
 from gcl.domain.enums import ConstraintType
 
@@ -48,6 +49,9 @@ def compute_action_for_step(
     if latency_target is not None and point.value > latency_target:
         overshoot_ratio = point.value / latency_target
         desired_scale = int(np.ceil(overshoot_ratio))
+        settings = get_settings()
+        config_max = settings.max_scale_replicas
+        desired_scale = min(desired_scale, config_max)
 
         if max_replicas is not None and desired_scale > max_replicas:
             if not _can_satisfy_with_alternatives(point, hard_constraints, max_replicas):
@@ -80,6 +84,9 @@ def _can_satisfy_with_alternatives(
     hard_constraints: list[Constraint],
     max_replicas: float,
 ) -> bool:
+    if max_replicas <= 0:
+        return False
+
     latency_target = None
     for c in hard_constraints:
         if c.type == ConstraintType.LATENCY:

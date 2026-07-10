@@ -57,6 +57,17 @@ def classification_to_evidence(record: dict[str, Any]) -> list[Evidence]:
             labels=common_labels,
             metadata=common_metadata,
         ))
+        forecast_value = record_metrics.get("forecast_value")
+        if forecast_value is not None:
+            try:
+                results.append(Evidence(
+                    metric="latency_ms",
+                    value=float(forecast_value),
+                    source="classification_metrics",
+                    labels={"contributing_to": class_name, "forecast": "true"},
+                ))
+            except (TypeError, ValueError):
+                pass
     elif class_name in _CAPACITY_CLASSES:
         results.append(Evidence(
             metric="capacity_pressure_score",

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ledger_timeout_seconds: int = Field(default=5, gt=0)
     warmup_time_multiplier: float = Field(default=1.5, gt=0.0)
     capacity_headroom_fraction: float = Field(default=0.1, ge=0.0, le=1.0)
+    max_scale_replicas: int = Field(default=20, gt=0)
+    spike_detection_threshold: float = Field(default=2.0, gt=1.0)
 
     llm_api_base: str = ""
     llm_api_key: str = ""

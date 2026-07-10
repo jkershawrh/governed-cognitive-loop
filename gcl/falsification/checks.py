@@ -107,6 +107,26 @@ def check_shed_load_bounded(
     return None
 
 
+def check_scale_magnitude_reasonable(
+    action_step: ActionStep,
+    evidence: list[Evidence],
+    constraints: list[Constraint],
+) -> Optional[str]:
+    """Reject scale actions that request more replicas than the configured max."""
+    if action_step.action_type != "scale":
+        return None
+    replicas = action_step.parameters.get("replicas")
+    if replicas is None:
+        return None
+    settings = get_settings()
+    if replicas > settings.max_scale_replicas:
+        return (
+            f"scale_magnitude_unreasonable: scale requests {replicas} replicas, "
+            f"exceeds configured maximum of {settings.max_scale_replicas}"
+        )
+    return None
+
+
 def check_migration_target_available(
     action_step: ActionStep,
     evidence: list[Evidence],

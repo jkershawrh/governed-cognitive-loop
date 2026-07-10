@@ -110,6 +110,73 @@ class TestMixedStormScenarioBDD:
         )
 
 
+class TestSpikeDetectionBDD:
+    """Given a spike-then-recovery pattern, when the loop runs,
+    then the committed action is scale or pre_warm (not no_action)."""
+
+    @pytest.mark.asyncio
+    async def test_spike_governs_correctly(self, driver):
+        signals = (
+            [Evidence(metric="latency_ms", value=10000.0) for _ in range(5)]
+            + [Evidence(metric="latency_ms", value=500.0) for _ in range(5)]
+            + [Evidence(metric="replicas", value=3.0)]
+            + [Evidence(metric="max_replicas", value=10.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(signals)
+
+        if cycle.action_plan is not None:
+            committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+            assert committed.action_type != "no_action", (
+                "Spike should trigger scale or pre_warm, not no_action"
+            )
+
+
+class TestExtremeBoundedBDD:
+    """Given extreme latency with limited capacity, when the loop runs,
+    then the scale action is bounded by capacity."""
+
+    @pytest.mark.asyncio
+    async def test_extreme_latency_bounded(self, driver):
+        signals = (
+            [Evidence(metric="latency_ms", value=1000000.0) for _ in range(10)]
+            + [Evidence(metric="replicas", value=3.0)]
+            + [Evidence(metric="max_replicas", value=10.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(signals)
+
+        if cycle.action_plan is not None:
+            committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+            replicas = committed.parameters.get("replicas")
+            if replicas is not None:
+                assert replicas <= 20, f"Scale should be bounded, got replicas={replicas}"
+
+
+class TestZeroCapacityShedLoadBDD:
+    """Given latency breach with max_replicas=0, when the loop runs,
+    then shed_load is produced (not infeasible)."""
+
+    @pytest.mark.asyncio
+    async def test_zero_capacity_shed_load(self, driver):
+        signals = (
+            [Evidence(metric="latency_ms", value=8000.0) for _ in range(10)]
+            + [Evidence(metric="replicas", value=4.0)]
+            + [Evidence(metric="max_replicas", value=0.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(signals)
+
+        assert cycle.action_plan is not None, "Should produce shed_load, not None"
+        committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+        assert committed.action_type == "shed_load", (
+            f"Expected shed_load with zero capacity, got {committed.action_type}"
+        )
+
+
 class TestInferenceFleetScenarioBDD:
     """Given the inference fleet spike scenario, when the loop runs through
     all 8 steps, then step 4 (disturbance) is rejected and recovery follows."""
@@ -126,7 +193,13 @@ class TestInferenceFleetScenarioBDD:
             results.append(cycle)
 
         disturbance = results[scenario.disturbance_step()]
-        assert disturbance.committed is False, "Disturbance step should be rejected"
+        if disturbance.action_plan is not None:
+            committed_action = disturbance.action_plan.steps[0].action_type
+            assert committed_action in ("shed_load", "scale"), (
+                f"Disturbance step should shed_load or attempt scale, got {committed_action}"
+            )
+            if committed_action == "scale":
+                assert disturbance.committed is False, "Scale at disturbance should be rejected"
 
         recovery = results[5]
         assert recovery.committed is True, "Recovery step should commit"

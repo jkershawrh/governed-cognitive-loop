@@ -89,6 +89,32 @@ class TestClassificationAdapter:
         assert primary.labels["taxonomy"] == "slo"
         assert primary.labels["agent_name"] == "slo_agent"
 
+    def test_slo_breach_emits_forecast_value_as_latency(self):
+        record = {
+            "class_name": "slo_breach_predicted",
+            "severity": "critical",
+            "confidence": 0.92,
+            "metrics": {"forecast_value": 6200.0, "slope_per_minute": 12.3},
+        }
+        evidence = classification_to_evidence(record)
+        latency = [e for e in evidence if e.metric == "latency_ms"]
+        assert len(latency) >= 1, "Should emit forecast_value as latency_ms"
+        assert latency[0].value == 6200.0
+
+    def test_slo_breach_without_forecast_value_still_works(self):
+        record = {
+            "class_name": "slo_breach_predicted",
+            "severity": "high",
+            "confidence": 0.8,
+            "metrics": {},
+        }
+        evidence = classification_to_evidence(record)
+        assert len(evidence) >= 1
+        slo = [e for e in evidence if e.metric == "slo_breach_severity"]
+        assert len(slo) == 1
+        latency = [e for e in evidence if e.metric == "latency_ms"]
+        assert len(latency) == 0  # No forecast_value, no latency evidence
+
     def test_batch_conversion(self):
         records = [
             {"class_name": "slo_breach_predicted", "confidence": 0.8},

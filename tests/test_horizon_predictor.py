@@ -75,6 +75,36 @@ class TestHorizonPredictor:
         assert trajectory.confidence == 0.0
         assert len(trajectory.points) == 5
 
+    def test_spike_detection(self, predictor):
+        """Spike pattern should produce trajectory reflecting peak, not average."""
+        signals = (
+            [Evidence(metric="latency_ms", value=10000.0) for _ in range(5)] +
+            [Evidence(metric="latency_ms", value=500.0) for _ in range(5)]
+        )
+        trajectory = predictor.predict(signals, horizon_steps=10)
+        assert trajectory.points[0].value > 5000, (
+            f"Spike not detected: first point={trajectory.points[0].value}, expected > 5000"
+        )
+
+    def test_latency_ms_preferred_over_other_metrics(self, predictor):
+        """When latency_ms signals are present, prefer them over other metrics."""
+        signals = (
+            [Evidence(metric="latency_ms", value=3000.0 + i * 100) for i in range(5)] +
+            [Evidence(metric="slo_breach_severity", value=0.5 + i * 0.05) for i in range(10)]
+        )
+        trajectory = predictor.predict(signals, horizon_steps=5)
+        # Trajectory should be in the 3000-4000 range (latency), not 0.5-1.0 (severity)
+        assert trajectory.points[0].value > 100, (
+            f"Predictor used wrong metric: value={trajectory.points[0].value}"
+        )
+
+    def test_no_spike_on_normal_data(self, predictor):
+        """Normal data should use regression, not spike detection."""
+        signals = [Evidence(metric="latency_ms", value=3000.0) for _ in range(10)]
+        trajectory = predictor.predict(signals, horizon_steps=5)
+        # Should be close to 3000, not inflated
+        assert abs(trajectory.points[0].value - 3000) < 500
+
     def test_two_data_points(self, predictor):
         signals = [
             Evidence(metric="latency_ms", value=3000.0),

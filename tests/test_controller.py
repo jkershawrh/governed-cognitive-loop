@@ -163,6 +163,43 @@ class TestController:
             assert committed.parameters.get("max_inflight", 0) > 0
             assert committed.parameters.get("duration_seconds", 0) > 0
 
+    def test_scale_capped_at_max_replicas(self, controller):
+        """Extreme latency should not produce replicas beyond capacity bound."""
+        trajectory = _breach_trajectory(1000000.0)  # 1M ms latency
+        latency_c = make_constraint(ctype=ConstraintType.LATENCY, bound=5000.0, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=10.0, hard=True)
+        objective = _make_objective(hard_ids=[latency_c.id, capacity_c.id])
+        result = controller.optimize(trajectory, objective, [latency_c, capacity_c])
+        if result is not None:
+            committed = result.steps[result.committed_step_index]
+            replicas = committed.parameters.get("replicas")
+            if replicas is not None:
+                assert replicas <= 10, f"replicas={replicas} exceeds capacity bound of 10"
+
+    def test_scale_capped_at_config_max(self, controller):
+        """Without capacity constraint, scale should still be bounded by config."""
+        trajectory = _breach_trajectory(50000.0)
+        latency_c = make_constraint(ctype=ConstraintType.LATENCY, bound=5000.0, hard=True)
+        objective = _make_objective(hard_ids=[latency_c.id])
+        result = controller.optimize(trajectory, objective, [latency_c])
+        if result is not None:
+            committed = result.steps[result.committed_step_index]
+            replicas = committed.parameters.get("replicas")
+            if replicas is not None:
+                from gcl.config import get_settings
+                assert replicas <= get_settings().max_scale_replicas, f"replicas={replicas} exceeds config max"
+
+    def test_shed_load_when_max_replicas_zero(self, controller):
+        """max_replicas=0 with latency breach should produce shed_load, not None."""
+        trajectory = _breach_trajectory(8000.0)
+        latency_c = make_constraint(ctype=ConstraintType.LATENCY, bound=5000.0, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=0.0, hard=True)
+        objective = _make_objective(hard_ids=[latency_c.id, capacity_c.id])
+        result = controller.optimize(trajectory, objective, [latency_c, capacity_c])
+        assert result is not None, "Should produce shed_load, not None"
+        committed = result.steps[result.committed_step_index]
+        assert committed.action_type == "shed_load", f"Expected shed_load, got {committed.action_type}"
+
     def test_no_optimality_claim(self):
         import inspect
         source = inspect.getsource(Controller)

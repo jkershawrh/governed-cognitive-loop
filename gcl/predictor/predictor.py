@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Optional
 
 from gcl.domain.contracts import Evidence, Trajectory, TrajectoryPoint
 from gcl.predictor.slo_seed import linear_regression
@@ -17,6 +18,11 @@ class HorizonPredictor:
         if len(values) < 3:
             last = values[-1] if values else 0.0
             return self._flat_trajectory(last, horizon_steps, confidence=0.1)
+
+        if len(values) >= 3:
+            spike_peak = self._detect_spike(values)
+            if spike_peak is not None:
+                return self._spike_trajectory(spike_peak, values, horizon_steps)
 
         x = list(range(len(values)))
         slope, intercept, r_squared = linear_regression(x, values)
@@ -45,9 +51,60 @@ class HorizonPredictor:
         )
 
     def _select_primary_metric(self, signals: list[Evidence]) -> list[Evidence]:
+        latency = [s for s in signals if s.metric == "latency_ms"]
+        if len(latency) >= 3:
+            return latency
         counts = Counter(s.metric for s in signals)
         primary = counts.most_common(1)[0][0]
         return [s for s in signals if s.metric == primary]
+
+    def _detect_spike(self, values: list[float]) -> Optional[float]:
+        """Detect if values contain a spike. Returns peak value or None."""
+        from gcl.config import get_settings
+        settings = get_settings()
+        mean = sum(values) / len(values)
+        if mean <= 0:
+            return None
+        peak = max(values)
+        if peak <= 5000:
+            return None
+        # Require a significant fraction of values to be far below the peak.
+        # This distinguishes true spikes from uniformly noisy data.
+        low_count = sum(1 for v in values if v < peak * 0.25)
+        if low_count < len(values) * 0.3:
+            return None
+        non_peak = [v for v in values if v < peak]
+        if non_peak:
+            baseline = sum(non_peak) / len(non_peak)
+        else:
+            baseline = mean
+        if baseline <= 0:
+            return None
+        if peak > baseline * settings.spike_detection_threshold:
+            return peak
+        return None
+
+    def _spike_trajectory(
+        self, peak: float, values: list[float], horizon_steps: int
+    ) -> Trajectory:
+        """Build a trajectory from a detected spike, decaying from peak."""
+        decay_rate = 0.9
+        points: list[TrajectoryPoint] = []
+        for i in range(horizon_steps):
+            val = peak * (decay_rate ** i)
+            margin = val * 0.1
+            points.append(TrajectoryPoint(
+                step=i,
+                value=val,
+                lower=val - margin,
+                upper=val + margin,
+            ))
+        confidence = min(0.85, len(values) / 10.0)
+        return Trajectory(
+            points=points,
+            horizon_steps=horizon_steps,
+            confidence=confidence,
+        )
 
     def _flat_trajectory(
         self, value: float, horizon_steps: int, confidence: float
