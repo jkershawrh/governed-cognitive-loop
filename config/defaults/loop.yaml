@@ -1,0 +1,8 @@
+horizon_length: 10
+confidence_threshold: 0.6
+falsification_confidence_floor: 0.5
+max_constraint_age_seconds: 300
+llm_timeout_seconds: 30
+ledger_timeout_seconds: 5
+warmup_time_multiplier: 1.5
+capacity_headroom_fraction: 0.1

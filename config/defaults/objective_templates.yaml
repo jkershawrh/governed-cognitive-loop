@@ -1,0 +1,35 @@
+templates:
+  latency_focused:
+    terms: ["latency_cost", "resource_cost"]
+    weights: [0.8, 0.2]
+    rationale: "Deterministic template: latency constraints detected, prioritizing latency reduction."
+    applies_when:
+      - constraint_type: latency
+
+  capacity_focused:
+    terms: ["capacity_cost", "resource_cost"]
+    weights: [0.7, 0.3]
+    rationale: "Deterministic template: capacity constraints detected, prioritizing capacity management."
+    applies_when:
+      - constraint_type: capacity
+
+  balanced:
+    terms: ["latency_cost", "capacity_cost", "resource_cost"]
+    weights: [0.4, 0.3, 0.3]
+    rationale: "Deterministic template: mixed constraints, balanced cost weighting."
+    applies_when: []
+
+  compliance_override:
+    terms: ["compliance_cost", "resource_cost"]
+    weights: [0.95, 0.05]
+    rationale: "Deterministic template: compliance constraint active, compliance dominates."
+    applies_when:
+      - constraint_type: compliance
+
+  shed_load_focused:
+    terms: ["throughput_preservation", "latency_cost"]
+    weights: [0.7, 0.3]
+    rationale: "Deterministic template: capacity exhausted with latency breach, preserving throughput via load shedding."
+    applies_when:
+      - constraint_type: capacity
+      - constraint_type: latency

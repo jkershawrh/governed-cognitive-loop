@@ -1,0 +1,80 @@
+version: "3"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: ledger
+    volumes:
+      - ../are-immutable-ledger/migrations/001_init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ../are-immutable-ledger/migrations/002_correlation_id_text.sql:/docker-entrypoint-initdb.d/02-correlation-id.sql
+      - ../are-immutable-ledger/demo/postgres-init/03-permissions.sql:/docker-entrypoint-initdb.d/03-permissions.sql
+      - ../are-immutable-ledger/migrations/003_hash_index.sql:/docker-entrypoint-initdb.d/04-hash-index.sql
+      - ../are-immutable-ledger/migrations/004_input_hash.sql:/docker-entrypoint-initdb.d/05-input-hash.sql
+      - ../are-immutable-ledger/migrations/005_writer_signature.sql:/docker-entrypoint-initdb.d/06-writer-signature.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  ledger:
+    build:
+      context: ../are-immutable-ledger
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ARE_LEDGER_DB_CONNECTION_STRING: "host=postgres port=5432 user=ledger_app password=ledger_app dbname=ledger sslmode=disable"
+      ARE_LEDGER_GRPC_PORT: "9092"
+      ARE_LEDGER_HEALTH_PORT: "8080"
+      ARE_LEDGER_METRICS_PORT: "8083"
+      ARE_LEDGER_KAFKA_BOOTSTRAP_SERVERS: "unused"
+      ARE_LEDGER_KAFKA_SASL_USERNAME: "unused"
+      ARE_LEDGER_KAFKA_SASL_PASSWORD: "unused"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/readyz || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  gateway:
+    image: python:3.11-slim
+    depends_on:
+      ledger:
+        condition: service_healthy
+    ports:
+      - "18099:18099"
+    working_dir: /app
+    volumes:
+      - ../are-immutable-ledger/api:/app/api
+      - ../are-immutable-ledger/sdks:/app/sdks
+      - ../are-immutable-ledger/proto:/app/proto
+    environment:
+      LEDGER_ENDPOINT: "ledger:9092"
+      GATEWAY_PORT: "18099"
+      GATEWAY_HOST: "0.0.0.0"
+    command: >
+      bash -c "pip install -q flask flask-cors grpcio protobuf &&
+               cd /app && python api/gateway.py"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:18099/api/summary')\" || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build:
+      context: .
+      dockerfile: Containerfile
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      GCL_FORCE_DETERMINISTIC: "1"
+      GCL_LEDGER_URL: "http://gateway:18099"
+    restart: unless-stopped

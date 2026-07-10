@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from gcl.api.schemas import ChainEntry, CycleRequest, CycleResponse
+from gcl.domain.contracts import Evidence, LoopCycle
+from gcl.loop.driver import LoopDriver
+from gcl.loop.ledger import LedgerClient
+from gcl.scenario.engine import (
+    clear_scenario,
+    get_active_scenario,
+    seed_scenario,
+)
+
+router = APIRouter(prefix="/api/v1")
+
+_ledger = LedgerClient()
+_driver = LoopDriver(ledger=_ledger)
+_cycles: dict[str, LoopCycle] = {}
+
+
+def get_driver() -> LoopDriver:
+    return _driver
+
+
+def get_ledger() -> LedgerClient:
+    return _ledger
+
+
+@router.post("/cycle", response_model=CycleResponse)
+async def run_cycle(request: CycleRequest) -> CycleResponse:
+    signals = [
+        Evidence(metric=s.metric, value=s.value, source=s.source)
+        for s in request.signals
+    ]
+
+    cycle = await _driver.run_cycle(signals)
+    _cycles[str(cycle.cycle_id)] = cycle
+
+    action_type = None
+    if cycle.action_plan is not None:
+        committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+        action_type = committed.action_type
+
+    verdict = None
+    if cycle.falsification is not None:
+        verdict = cycle.falsification.verdict.value
+
+    return CycleResponse(
+        cycle_id=str(cycle.cycle_id),
+        correlation_id=cycle.correlation_id,
+        committed=cycle.committed,
+        action_type=action_type,
+        falsification_verdict=verdict,
+    )
+
+
+@router.get("/cycles/{cycle_id}")
+async def get_cycle(cycle_id: str) -> dict:
+    cycle = _cycles.get(cycle_id)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="Cycle not found")
+    return cycle.model_dump(mode="json")
+
+
+@router.get("/cycles/{cycle_id}/chain", response_model=list[ChainEntry])
+async def get_chain(cycle_id: str) -> list[ChainEntry]:
+    cycle = _cycles.get(cycle_id)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="Cycle not found")
+
+    entries = await _ledger.query_chain(cycle.correlation_id)
+    result = []
+    for e in entries:
+        content = e.get("content", {})
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (json.JSONDecodeError, ValueError):
+                content = {"raw": content}
+        result.append(ChainEntry(
+            entry_id=e.get("entry_id", ""),
+            entry_type=e.get("entry_type", ""),
+            correlation_id=e.get("correlation_id", ""),
+            content=content,
+        ))
+    return result
+
+
+@router.get("/cycles")
+async def list_cycles() -> list[CycleResponse]:
+    results = []
+    for cycle in _cycles.values():
+        action_type = None
+        if cycle.action_plan is not None:
+            committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+            action_type = committed.action_type
+        verdict = None
+        if cycle.falsification is not None:
+            verdict = cycle.falsification.verdict.value
+        results.append(CycleResponse(
+            cycle_id=str(cycle.cycle_id),
+            correlation_id=cycle.correlation_id,
+            committed=cycle.committed,
+            action_type=action_type,
+            falsification_verdict=verdict,
+        ))
+    return results
+
+
+@router.post("/reset")
+async def reset() -> dict:
+    global _ledger, _driver, _cycles
+    _cycles.clear()
+    _ledger._memory.clear()
+    clear_scenario()
+    return {"status": "reset"}
+
+
+class ScenarioSeedRequest(BaseModel):
+    scenario: str = "inference_fleet_spike"
+    seed: int = 42
+
+
+@router.post("/scenario/seed")
+async def seed_scenario_endpoint(request: ScenarioSeedRequest) -> dict:
+    engine = seed_scenario(request.scenario, request.seed)
+    return engine.metadata()
+
+
+@router.get("/scenario/step/{step_index}")
+async def get_scenario_step(step_index: int) -> dict:
+    engine = get_active_scenario()
+    if engine is None:
+        raise HTTPException(status_code=400, detail="No scenario seeded. POST /api/v1/scenario/seed first.")
+    try:
+        signals = engine.get_step(step_index)
+    except IndexError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "step_index": step_index,
+        "signals": [
+            {"metric": s.metric, "value": s.value, "source": s.source}
+            for s in signals
+        ],
+    }

@@ -1,0 +1,56 @@
+rules:
+  - name: latency_breach
+    metric: latency_ms
+    operator: gt
+    threshold: 5000
+    constraint_type: latency
+    hard: true
+    confidence: 0.9
+
+  - name: capacity_ceiling
+    metric: replicas
+    operator: gte
+    threshold_ref: max_replicas
+    constraint_type: capacity
+    hard: true
+    confidence: 0.95
+
+  - name: budget_limit
+    metric: hourly_cost
+    operator: gt
+    threshold: 1000
+    constraint_type: budget
+    hard: false
+    confidence: 0.85
+
+  - name: compliance_region
+    metric: data_residency_violation
+    operator: eq
+    threshold: 1
+    constraint_type: compliance
+    hard: true
+    confidence: 1.0
+
+  - name: slo_breach_classification
+    metric: slo_breach_severity
+    operator: gt
+    threshold: 0.6
+    constraint_type: latency
+    hard: true
+    confidence: 0.9
+
+  - name: capacity_pressure_classification
+    metric: capacity_pressure_score
+    operator: gt
+    threshold: 0.7
+    constraint_type: capacity
+    hard: true
+    confidence: 0.9
+
+  - name: compliance_violation_classification
+    metric: compliance_violation_flag
+    operator: eq
+    threshold: 1
+    constraint_type: compliance
+    hard: true
+    confidence: 1.0

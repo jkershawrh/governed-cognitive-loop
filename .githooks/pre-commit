@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== pre-commit: governed-cognitive-loop ==="
+
+# 1. No secrets
+echo "[1/5] Scanning for secrets..."
+if git diff --cached --name-only | xargs grep -lE "(password|secret|token|api_key)=" 2>/dev/null | grep -v "podman-compose.yaml\|constraints.yaml\|test_\|conftest\|\.md$" | head -1 | grep -q .; then
+  echo "FAIL: Possible secrets in staged files"
+  exit 1
+fi
+echo "  OK"
+
+# 2. No em-dashes
+echo "[2/5] Checking for em-dashes..."
+if git diff --cached --name-only -- '*.py' '*.ts' '*.tsx' '*.md' '*.yaml' | xargs grep -Pn $'\xe2\x80\x94' 2>/dev/null | head -1 | grep -q .; then
+  echo "FAIL: Em-dash found in staged files"
+  exit 1
+fi
+echo "  OK"
+
+# 3. No optimality claims in Python source
+echo "[3/5] Checking for optimality overclaims..."
+if git diff --cached --name-only -- 'gcl/*.py' | xargs grep -in "optimal" 2>/dev/null | grep -v "not claim\|does not\|no \|suboptimal" | head -1 | grep -q .; then
+  echo "FAIL: Optimality claim found"
+  exit 1
+fi
+echo "  OK"
+
+# 4. Python tests pass
+echo "[4/5] Running tests..."
+if [ -d ".venv" ]; then
+  source .venv/bin/activate
+  GCL_FORCE_DETERMINISTIC=1 GCL_LEDGER_SKIP=1 python3 -m pytest tests/ -q --tb=line 2>&1 | tail -3
+else
+  echo "  SKIP (no .venv)"
+fi
+
+# 5. Frontend TypeScript compiles
+echo "[5/5] TypeScript check..."
+if [ -d "frontend/node_modules" ]; then
+  cd frontend && npx tsc --noEmit 2>&1 | tail -3
+  cd ..
+  echo "  OK"
+else
+  echo "  SKIP (no node_modules)"
+fi
+
+echo ""
+echo "pre-commit: PASSED"
