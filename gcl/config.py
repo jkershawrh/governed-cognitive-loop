@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     llm_model: str = "granite-3-2-8b-instruct-cpu"
     ledger_url: str = ""
     fleet_url: str = ""
+    fleet_token: str = ""
     force_deterministic: bool = False
 
     model_config = {"env_prefix": "GCL_"}

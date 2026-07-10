@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class FleetAdapter:
-    def __init__(self, url: Optional[str] = None):
+    def __init__(self, url: Optional[str] = None, token: Optional[str] = None):
         settings = get_settings()
         self._url = url or settings.fleet_url
+        self._token = token or settings.fleet_token
         self._timeout = 10
 
     async def actuate(
@@ -29,11 +30,16 @@ class FleetAdapter:
             logger.info("Fleet URL not configured, skipping actuation: %s", intent.type)
             return intent.model_dump()
 
+        headers = {}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     f"{self._url}/api/v1/intents",
                     json=intent.model_dump(),
+                    headers=headers,
                 )
                 response.raise_for_status()
                 return response.json()

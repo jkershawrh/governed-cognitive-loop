@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from gcl.adapter.classification_adapter import batch_classifications_to_evidence
 from gcl.api.schemas import ChainEntry, CycleRequest, CycleResponse
 from gcl.domain.contracts import Evidence, LoopCycle
 from gcl.loop.driver import LoopDriver
@@ -147,3 +148,44 @@ async def get_scenario_step(step_index: int) -> dict:
             for s in signals
         ],
     }
+
+
+class ClassificationCycleRequest(BaseModel):
+    classifications: list[dict]
+    additional_signals: list[dict] = []
+
+
+@router.post("/classify-and-run", response_model=CycleResponse)
+async def classify_and_run(request: ClassificationCycleRequest) -> CycleResponse:
+    """Accept deepfield-fleet ClassificationRecords, convert to Evidence, run a cycle."""
+    evidence = batch_classifications_to_evidence(request.classifications)
+
+    for sig in request.additional_signals:
+        evidence.append(Evidence(
+            metric=sig.get("metric", "unknown"),
+            value=float(sig.get("value", 0)),
+            source=sig.get("source", "external"),
+        ))
+
+    if not evidence:
+        raise HTTPException(status_code=400, detail="No evidence produced from classifications.")
+
+    cycle = await _driver.run_cycle(evidence)
+    _cycles[str(cycle.cycle_id)] = cycle
+
+    action_type = None
+    if cycle.action_plan is not None:
+        committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+        action_type = committed.action_type
+
+    verdict = None
+    if cycle.falsification is not None:
+        verdict = cycle.falsification.verdict.value
+
+    return CycleResponse(
+        cycle_id=str(cycle.cycle_id),
+        correlation_id=cycle.correlation_id,
+        committed=cycle.committed,
+        action_type=action_type,
+        falsification_verdict=verdict,
+    )
