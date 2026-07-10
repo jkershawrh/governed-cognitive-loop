@@ -42,7 +42,15 @@ class HorizonPredictor:
                 )
             )
 
-        confidence = max(0.0, min(1.0, r_squared * min(len(values) / 10.0, 1.0)))
+        mean = sum(values) / len(values)
+        if mean > 0:
+            cv = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 / mean
+        else:
+            cv = 1.0
+        if cv < 0.15 and len(values) >= 5:
+            confidence = max(0.7, min(1.0, len(values) / 10.0))
+        else:
+            confidence = max(0.0, min(1.0, r_squared * min(len(values) / 10.0, 1.0)))
 
         return Trajectory(
             points=points,
