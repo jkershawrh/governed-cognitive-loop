@@ -46,6 +46,8 @@ spec:
               value: "oberon-fleet-secret-2026"
             - name: DEEPFIELD_FLEET_URL
               value: "http://deepfield-fleet.fleet-llm-d.svc:8000"
+            - name: GUARDIAN_URL
+              value: "http://localhost:8081"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -65,6 +67,47 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+        - name: guardian
+          image: quay.io/rh-ee-jkershaw/guardian:latest
+          ports:
+            - containerPort: 8081
+          env:
+            - name: PORT
+              value: "8081"
+            - name: GUARDIAN_CONFIG
+              value: "/app/guardian.yaml"
+          volumeMounts:
+            - name: guardian-config
+              mountPath: /app/guardian.yaml
+              subPath: guardian.yaml
+            - name: guardian-policies
+              mountPath: /app/policies
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: guardian-config
+          configMap:
+            name: guardian-config
+        - name: guardian-policies
+          configMap:
+            name: guardian-policies
 ---
 apiVersion: v1
 kind: Service

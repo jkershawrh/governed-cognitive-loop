@@ -458,6 +458,58 @@ class TestMultiClusterMigrate:
         )
 
 
+class TestRuntimeHonestyBoundary:
+    """Green: Guardian validates LLM responses, blocks action fields, falls back safely."""
+
+    @pytest.mark.asyncio
+    async def test_guardian_blocks_action_fields(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from gcl.inference.client import InferenceResult, _validate_with_guardian
+
+        result = InferenceResult(
+            text='{"action_type": "scale", "replicas": 10}',
+            model="test",
+        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"allowed": False, "reason": "blocked"}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch.dict("os.environ", {"GUARDIAN_URL": "http://localhost:8081"}):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                validated = await _validate_with_guardian(result)
+
+        assert validated is None, "Guardian should block responses with action fields"
+
+    @pytest.mark.asyncio
+    async def test_guardian_allows_objective_fields(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from gcl.inference.client import InferenceResult, _validate_with_guardian
+
+        result = InferenceResult(
+            text='{"terms": ["latency_cost"], "weights": [1.0], "rationale": "test"}',
+            model="test",
+        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"allowed": True}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch.dict("os.environ", {"GUARDIAN_URL": "http://localhost:8081"}):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                validated = await _validate_with_guardian(result)
+
+        assert validated is not None, "Guardian should allow ObjectiveSpec responses"
+
+
 def evaluate_rubric() -> dict:
     """Summary function for rubric evaluation (called programmatically)."""
     return {
@@ -476,4 +528,5 @@ def evaluate_rubric() -> dict:
         "scale_magnitude_bounded": "green",
         "spike_detection": "green",
         "multi_cluster_migrate": "green",
+        "runtime_honesty_boundary": "green",
     }

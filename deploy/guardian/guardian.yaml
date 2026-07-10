@@ -1,0 +1,18 @@
+port: 8081
+log_path: /var/lib/guardian/log.jsonl
+
+policy_paths:
+  - /app/policies/honesty-boundary.rego
+
+mcp:
+  enabled: true
+  block_unauthorized_tools: true
+  blocked_tool_patterns:
+    - "^.*execute_action.*$"
+    - "^.*set_replicas.*$"
+    - "^.*scale_deployment.*$"
+  allowed_tool_patterns:
+    - "^.*interpret.*$"
+    - "^.*classify.*$"
+    - "^.*predict.*$"
+    - "^.*query.*$"
