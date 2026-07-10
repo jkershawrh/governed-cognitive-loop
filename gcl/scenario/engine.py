@@ -26,6 +26,8 @@ class ScenarioEngine:
             self._build_slo_cascade()
         elif self._scenario == "mixed_storm":
             self._build_mixed_storm()
+        elif self._scenario == "multi_cluster_migration":
+            self._build_multi_cluster_migration()
         else:
             self._build_inference_fleet_spike()
 
@@ -339,6 +341,183 @@ class ScenarioEngine:
                 signals.append(Evidence(metric="replicas", value=5.0, source="kubernetes"))
                 signals.append(Evidence(metric="max_replicas", value=10.0, source="kubernetes"))
                 signals.append(Evidence(metric="hourly_cost", value=500.0, source="billing"))
+
+            self._steps.append(signals)
+
+    def _build_multi_cluster_migration(self) -> None:
+        """8 steps: cross-cluster pressure and migration.
+
+        Steps 0-1: Normal on edge-east.
+        Step 2: Pressure building on edge-east.
+        Step 3: Capacity exhausted on edge-east, target pool hint.
+        Step 4 (disturbance): Compliance violation, data residency breach.
+        Steps 5-6: Recovery on sovereign-eu.
+        Step 7: Settled on sovereign-eu.
+        """
+        self._disturbance_step = 4
+
+        for step in range(8):
+            signals: list[Evidence] = []
+
+            if step <= 1:
+                # Normal operation on edge-east
+                for i in range(10):
+                    jitter = self._rng.uniform(-100, 100)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=2500 + i * 20 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "edge-east"},
+                    ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=10.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "edge-east"},
+                ))
+
+            elif step == 2:
+                # Pressure building on edge-east
+                for i in range(10):
+                    jitter = self._rng.uniform(-100, 150)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=4500 + i * 30 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "edge-east"},
+                    ))
+                signals.append(Evidence(
+                    metric="capacity_pressure_score", value=0.85,
+                    source="classification", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=10.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "edge-east"},
+                ))
+
+            elif step == 3:
+                # Capacity exhausted on edge-east
+                for i in range(10):
+                    jitter = self._rng.uniform(-200, 300)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=7000 + i * 60 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "edge-east"},
+                    ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=0.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="data_residency_violation", value=0.0,
+                    source="classification", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="target_pool", value=0.0,
+                    source="classification", labels={"pool": "edge-west"},
+                ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "edge-east"},
+                ))
+
+            elif step == 4:
+                # Disturbance: compliance violation
+                for i in range(10):
+                    jitter = self._rng.uniform(-80, 80)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=3000 + i * 20 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "edge-east", "target_cluster": "sovereign-eu"},
+                    ))
+                signals.append(Evidence(
+                    metric="compliance_violation_flag", value=1.0,
+                    source="classification",
+                    labels={"cluster": "edge-east", "target_cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="data_residency_violation", value=1.0,
+                    source="classification",
+                    labels={"cluster": "edge-east", "target_cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=0.0,
+                    source="kubernetes", labels={"cluster": "edge-east"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "edge-east"},
+                ))
+
+            elif step <= 6:
+                # Recovery on sovereign-eu
+                for i in range(10):
+                    jitter = self._rng.uniform(-80, 80)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=2500 + i * 15 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "sovereign-eu"},
+                    ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=10.0,
+                    source="kubernetes", labels={"cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "sovereign-eu"},
+                ))
+
+            else:
+                # Settled on sovereign-eu
+                for i in range(10):
+                    jitter = self._rng.uniform(-60, 60)
+                    signals.append(Evidence(
+                        metric="latency_ms",
+                        value=2000 + i * 10 + jitter,
+                        source="prometheus",
+                        labels={"cluster": "sovereign-eu"},
+                    ))
+                signals.append(Evidence(
+                    metric="replicas", value=4.0,
+                    source="kubernetes", labels={"cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="max_replicas", value=10.0,
+                    source="kubernetes", labels={"cluster": "sovereign-eu"},
+                ))
+                signals.append(Evidence(
+                    metric="hourly_cost", value=500.0,
+                    source="billing", labels={"cluster": "sovereign-eu"},
+                ))
 
             self._steps.append(signals)
 

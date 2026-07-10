@@ -200,6 +200,28 @@ class TestController:
         committed = result.steps[result.committed_step_index]
         assert committed.action_type == "shed_load", f"Expected shed_load, got {committed.action_type}"
 
+    def test_migrate_on_compliance_plus_capacity_exhaustion(self, controller):
+        """Compliance + capacity exhaustion should produce migrate."""
+        trajectory = _breach_trajectory(3000.0)
+        compliance_c = make_constraint(ctype=ConstraintType.COMPLIANCE, bound=1.0, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=0.0, hard=True)
+        objective = _make_objective(hard_ids=[compliance_c.id, capacity_c.id])
+        result = controller.optimize(trajectory, objective, [compliance_c, capacity_c])
+        assert result is not None
+        committed = result.steps[result.committed_step_index]
+        assert committed.action_type == "migrate"
+
+    def test_alert_on_compliance_without_capacity_exhaustion(self, controller):
+        """Compliance alone (no capacity pressure) should produce alert."""
+        trajectory = _breach_trajectory(3000.0)
+        compliance_c = make_constraint(ctype=ConstraintType.COMPLIANCE, bound=1.0, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=10.0, hard=True)
+        objective = _make_objective(hard_ids=[compliance_c.id, capacity_c.id])
+        result = controller.optimize(trajectory, objective, [compliance_c, capacity_c])
+        assert result is not None
+        committed = result.steps[result.committed_step_index]
+        assert committed.action_type == "alert"
+
     def test_no_optimality_claim(self):
         import inspect
         source = inspect.getsource(Controller)

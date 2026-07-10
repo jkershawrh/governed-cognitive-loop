@@ -150,6 +150,42 @@ async def get_scenario_step(step_index: int) -> dict:
     }
 
 
+@router.get("/modelplane/status")
+async def modelplane_status() -> dict:
+    """Fetch cluster and deployment state from fleet-controller ModelPlane endpoints."""
+    import os
+
+    fleet_url = os.environ.get("GCL_FLEET_URL", "")
+    if not fleet_url:
+        return {"clusters": [], "deployments": [], "error": "GCL_FLEET_URL not configured"}
+
+    import httpx
+
+    from gcl.adapter.fleet_adapter import _generate_fleet_token
+    from gcl.config import get_settings
+
+    settings = get_settings()
+    headers: dict[str, str] = {}
+    if settings.fleet_token:
+        headers["Authorization"] = f"Bearer {_generate_fleet_token(settings.fleet_token)}"
+
+    result: dict = {"clusters": [], "deployments": []}
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            r = await client.get(f"{fleet_url}/api/v1/modelplane/clusters", headers=headers)
+            if r.status_code == 200:
+                result["clusters"] = r.json()
+        except Exception:
+            pass
+        try:
+            r = await client.get(f"{fleet_url}/api/v1/modelplane/deployments", headers=headers)
+            if r.status_code == 200:
+                result["deployments"] = r.json()
+        except Exception:
+            pass
+    return result
+
+
 class ClassificationCycleRequest(BaseModel):
     classifications: list[dict]
     additional_signals: list[dict] = []

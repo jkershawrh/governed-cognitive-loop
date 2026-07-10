@@ -127,6 +127,33 @@ class TestMixedStormScenario:
         assert "compliance_violation_flag" in metrics
 
 
+class TestMultiClusterMigrationScenario:
+    def test_multi_cluster_scenario(self):
+        engine = ScenarioEngine(scenario="multi_cluster_migration")
+        assert engine.total_steps() == 8
+        assert engine.disturbance_step() == 4
+
+    def test_step3_has_capacity_exhaustion(self):
+        engine = ScenarioEngine(scenario="multi_cluster_migration")
+        signals = engine.get_step(3)
+        max_rep = [s for s in signals if s.metric == "max_replicas"]
+        assert len(max_rep) >= 1
+        assert max_rep[0].value <= 0
+
+    def test_step4_has_compliance_violation(self):
+        engine = ScenarioEngine(scenario="multi_cluster_migration")
+        signals = engine.get_step(4)
+        compliance = [s for s in signals if s.metric == "compliance_violation_flag"]
+        assert len(compliance) >= 1
+        assert compliance[0].value == 1.0
+
+    def test_step0_has_cluster_labels(self):
+        engine = ScenarioEngine(scenario="multi_cluster_migration")
+        signals = engine.get_step(0)
+        labeled = [s for s in signals if s.labels.get("cluster")]
+        assert len(labeled) > 0
+
+
 class TestScenarioGlobals:
     def test_seed_and_get(self):
         clear_scenario()

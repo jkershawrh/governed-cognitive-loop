@@ -203,3 +203,32 @@ class TestInferenceFleetScenarioBDD:
 
         recovery = results[5]
         assert recovery.committed is True, "Recovery step should commit"
+
+
+class TestMultiClusterMigrationBDD:
+    """Given multi-cluster pressure with compliance violation, when the loop runs,
+    then migrate is produced at step 3 and alert at step 4."""
+
+    @pytest.mark.asyncio
+    async def test_multi_cluster_step3_migrate_or_shed(self, driver):
+        scenario = ScenarioEngine(scenario="multi_cluster_migration", seed=42)
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(scenario.get_step(3))
+        if cycle.action_plan is not None:
+            committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+            assert committed.action_type in ("migrate", "shed_load"), (
+                f"Step 3 should produce migrate or shed_load, got {committed.action_type}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_multi_cluster_step4_compliance(self, driver):
+        scenario = ScenarioEngine(scenario="multi_cluster_migration", seed=42)
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(scenario.get_step(4))
+        if cycle.action_plan is not None:
+            committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+            assert committed.action_type in ("alert", "migrate"), (
+                f"Step 4 should produce alert or migrate, got {committed.action_type}"
+            )

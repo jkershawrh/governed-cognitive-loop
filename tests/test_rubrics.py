@@ -416,6 +416,48 @@ class TestSpikeDetection:
         )
 
 
+class TestMultiClusterMigrate:
+    """Green: compliance + capacity exhaustion produces migrate, not alert or scale."""
+
+    def test_migrate_when_compliance_plus_exhaustion(self):
+        controller = Controller()
+        compliance_c = make_constraint(ctype=ConstraintType.COMPLIANCE, bound=1, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=0, hard=True)
+
+        points = [TrajectoryPoint(step=i, value=3000.0) for i in range(10)]
+        trajectory = Trajectory(points=points, horizon_steps=10, confidence=0.8)
+        objective = ObjectiveSpec(
+            terms=["compliance_cost"], weights=[1.0],
+            hard_constraint_ids=[compliance_c.id, capacity_c.id],
+            soft_constraint_ids=[], rationale="Test.",
+        )
+        result = controller.optimize(trajectory, objective, [compliance_c, capacity_c])
+        assert result is not None
+        committed = result.steps[result.committed_step_index]
+        assert committed.action_type == "migrate", (
+            f"Compliance + exhaustion should migrate, got {committed.action_type}"
+        )
+
+    def test_alert_when_compliance_alone(self):
+        controller = Controller()
+        compliance_c = make_constraint(ctype=ConstraintType.COMPLIANCE, bound=1, hard=True)
+        capacity_c = make_constraint(ctype=ConstraintType.CAPACITY, bound=10, hard=True)
+
+        points = [TrajectoryPoint(step=i, value=3000.0) for i in range(10)]
+        trajectory = Trajectory(points=points, horizon_steps=10, confidence=0.8)
+        objective = ObjectiveSpec(
+            terms=["compliance_cost"], weights=[1.0],
+            hard_constraint_ids=[compliance_c.id, capacity_c.id],
+            soft_constraint_ids=[], rationale="Test.",
+        )
+        result = controller.optimize(trajectory, objective, [compliance_c, capacity_c])
+        assert result is not None
+        committed = result.steps[result.committed_step_index]
+        assert committed.action_type == "alert", (
+            f"Compliance alone should alert, got {committed.action_type}"
+        )
+
+
 def evaluate_rubric() -> dict:
     """Summary function for rubric evaluation (called programmatically)."""
     return {
@@ -433,4 +475,5 @@ def evaluate_rubric() -> dict:
         "load_shedding_safety": "green",
         "scale_magnitude_bounded": "green",
         "spike_detection": "green",
+        "multi_cluster_migrate": "green",
     }

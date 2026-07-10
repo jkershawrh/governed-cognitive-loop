@@ -26,20 +26,31 @@ def compute_action_for_step(
     capacity_bounds = [c for c in hard_constraints if c.type == ConstraintType.CAPACITY]
     latency_bounds = [c for c in hard_constraints if c.type == ConstraintType.LATENCY]
 
-    # Compliance constraints take priority over latency.
-    if compliance_bounds:
-        action_type = "alert"
-        parameters = {
-            "severity": "critical",
-            "message": "Compliance constraint active",
-            "recommended_action": "migrate workloads",
-        }
-        return {"action_type": action_type, "parameters": parameters}
-
     max_replicas = None
     for c in capacity_bounds:
         if max_replicas is None or c.bound < max_replicas:
             max_replicas = c.bound
+
+    # Compliance constraints take priority over latency.
+    if compliance_bounds:
+        if capacity_bounds and max_replicas is not None and max_replicas <= 1:
+            # Compliance with exhausted capacity requires workload migration.
+            action_type = "migrate"
+            parameters = {
+                "source_pool": "default",
+                "target_pool": "sovereign",
+                "model": "default",
+                "reason": "Compliance constraint with exhausted capacity requires migration",
+            }
+        else:
+            # Compliance alone triggers an alert.
+            action_type = "alert"
+            parameters = {
+                "severity": "critical",
+                "message": "Compliance constraint active",
+                "recommended_action": "migrate workloads",
+            }
+        return {"action_type": action_type, "parameters": parameters}
 
     latency_target = None
     for c in latency_bounds:
