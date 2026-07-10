@@ -49,6 +49,13 @@ class HorizonPredictor:
             cv = 1.0
         if cv < 0.15 and len(values) >= 5:
             confidence = max(0.7, min(1.0, len(values) / 10.0))
+        elif len(values) >= 10 and mean > 0:
+            sample_factor = min(1.0, len(values) / 20.0)
+            min_val = min(values)
+            if min_val > 0 and mean / min_val < 3:
+                confidence = max(0.6, sample_factor * 0.8)
+            else:
+                confidence = max(r_squared * sample_factor, 0.35 * sample_factor + 0.1)
         else:
             confidence = max(0.0, min(1.0, r_squared * min(len(values) / 10.0, 1.0)))
 
