@@ -205,6 +205,24 @@ class TestInferenceFleetScenarioBDD:
         assert recovery.committed is True, "Recovery step should commit"
 
 
+class TestSemanticRoutingBDD:
+    """Given prompts of varying complexity, when classified,
+    then simple routes to small models and complex to large."""
+
+    def test_mixed_prompts_classified_correctly(self):
+        from gcl.classifier.prompt_classifier import PromptClassifier, PromptTier
+        classifier = PromptClassifier()
+
+        simple_prompts = ["What is 2+2?", "Hello", "Define gravity", "Who is Einstein?"]
+        complex_prompts = ["Write a detailed essay on quantum computing", "Implement a red-black tree", "Analyze the economic impact of AI"]
+
+        for p in simple_prompts:
+            assert classifier.classify(p).tier == PromptTier.SIMPLE, f"Expected simple for: {p}"
+
+        for p in complex_prompts:
+            assert classifier.classify(p).tier == PromptTier.COMPLEX, f"Expected complex for: {p}"
+
+
 class TestMultiClusterMigrationBDD:
     """Given multi-cluster pressure with compliance violation, when the loop runs,
     then migrate is produced at step 3 and alert at step 4."""

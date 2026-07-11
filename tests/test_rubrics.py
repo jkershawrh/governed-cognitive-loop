@@ -510,6 +510,29 @@ class TestRuntimeHonestyBoundary:
         assert validated is not None, "Guardian should allow ObjectiveSpec responses"
 
 
+class TestSemanticRouting:
+    """Green: prompts classified by tier, models mapped per tier."""
+
+    def test_tiers_produce_correct_models(self):
+        from gcl.classifier.prompt_classifier import PromptClassifier, PromptTier
+        classifier = PromptClassifier()
+
+        simple_models = classifier.get_models_for_tier(PromptTier.SIMPLE)
+        complex_models = classifier.get_models_for_tier(PromptTier.COMPLEX)
+
+        assert len(simple_models) >= 1, "Simple tier must have models"
+        assert len(complex_models) >= 1, "Complex tier must have models"
+
+    def test_classification_confidence_bounded(self):
+        from gcl.classifier.prompt_classifier import PromptClassifier
+        classifier = PromptClassifier()
+
+        prompts = ["Hello", "What is AI?", "Write an analysis", "Implement sorting", "xyz"]
+        for p in prompts:
+            r = classifier.classify(p)
+            assert 0.0 <= r.confidence <= 1.0, f"Confidence out of range for: {p}"
+
+
 def evaluate_rubric() -> dict:
     """Summary function for rubric evaluation (called programmatically)."""
     return {
@@ -529,4 +552,5 @@ def evaluate_rubric() -> dict:
         "spike_detection": "green",
         "multi_cluster_migrate": "green",
         "runtime_honesty_boundary": "green",
+        "semantic_routing": "green",
     }

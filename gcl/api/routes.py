@@ -186,6 +186,15 @@ async def modelplane_status() -> dict:
     return result
 
 
+@router.post("/classify-prompt")
+async def classify_prompt(request: dict) -> dict:
+    from gcl.classifier.prompt_classifier import PromptClassifier
+    classifier = PromptClassifier()
+    prompt = request.get("prompt", "")
+    result = classifier.classify(prompt)
+    return result.model_dump()
+
+
 class ClassificationCycleRequest(BaseModel):
     classifications: list[dict]
     additional_signals: list[dict] = []

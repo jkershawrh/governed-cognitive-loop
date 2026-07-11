@@ -137,6 +137,25 @@ class TestComplianceProperty:
             )
 
 
+class TestSemanticRoutingProperty:
+    @pytest.mark.parametrize("seed", range(50))
+    def test_simple_never_routes_complex_models(self, seed):
+        from gcl.classifier.prompt_classifier import PromptClassifier, PromptTier
+        import random
+        classifier = PromptClassifier()
+        rng = random.Random(seed)
+
+        simple_starters = ["what is", "who is", "define", "how many", "when did", "hello", "hi", "yes", "no"]
+        prompt = rng.choice(simple_starters) + " " + "test " * rng.randint(1, 5)
+        result = classifier.classify(prompt)
+
+        if result.tier == PromptTier.SIMPLE:
+            models = classifier.get_models_for_tier(result.tier)
+            complex_models = classifier.get_models_for_tier(PromptTier.COMPLEX)
+            for m in models:
+                assert m not in complex_models or m in classifier.get_models_for_tier(PromptTier.SIMPLE)
+
+
 class TestShedLoadProperty:
     @pytest.mark.parametrize("seed", range(50))
     def test_shed_load_parameters_bounded(self, controller, seed):

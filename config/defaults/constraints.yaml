@@ -54,3 +54,11 @@ rules:
     constraint_type: compliance
     hard: true
     confidence: 1.0
+
+  - name: tier_imbalance_simple
+    metric: semantic_tier_simple_ratio
+    operator: gt
+    threshold: 0.8
+    constraint_type: capacity
+    hard: false
+    confidence: 0.7

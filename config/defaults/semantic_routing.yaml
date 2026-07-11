@@ -1,0 +1,24 @@
+tiers:
+  simple:
+    models: ["granite-350m", "granite-3.2-sovereign"]
+    max_tokens: 50
+    target_latency_ms: 1000
+  standard:
+    models: ["granite-3.2-sovereign", "granite-2b"]
+    max_tokens: 200
+    target_latency_ms: 3000
+  complex:
+    models: ["granite-3b", "granite-8b"]
+    max_tokens: 500
+    target_latency_ms: 10000
+
+rules:
+  - pattern: "^(what is|who is|define|how many|when did|yes|no|hello|hi|hey)"
+    tier: simple
+    confidence: 0.9
+  - pattern: "^(explain|describe|summarize|compare|list|tell me about)"
+    tier: standard
+    confidence: 0.8
+  - pattern: "^(write|analyze|design|implement|prove|evaluate|debug|refactor|optimize|architect|create a detailed)"
+    tier: complex
+    confidence: 0.85

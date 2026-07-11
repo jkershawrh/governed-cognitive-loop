@@ -115,6 +115,17 @@ class TestClassificationAdapter:
         latency = [e for e in evidence if e.metric == "latency_ms"]
         assert len(latency) == 0  # No forecast_value, no latency evidence
 
+    def test_semantic_tier_to_evidence(self):
+        record = {
+            "class_name": "semantic_tier_simple",
+            "severity": "info",
+            "confidence": 0.75,
+        }
+        evidence = classification_to_evidence(record)
+        tier_ev = [e for e in evidence if "semantic_tier" in e.metric]
+        assert len(tier_ev) >= 1
+        assert tier_ev[0].value == 0.75
+
     def test_batch_conversion(self):
         records = [
             {"class_name": "slo_breach_predicted", "confidence": 0.8},

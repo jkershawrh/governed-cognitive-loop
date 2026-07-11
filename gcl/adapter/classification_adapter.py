@@ -16,6 +16,11 @@ _COMPLIANCE_CLASSES = {
     "policy_violation", "compliance_violation",
 }
 
+_SEMANTIC_TIER_CLASSES = {
+    "semantic_tier_simple", "semantic_tier_standard",
+    "semantic_tier_complex", "semantic_tier_specialized",
+}
+
 _SEVERITY_SCORES = {
     "info": 0.1,
     "low": 0.3,
@@ -81,6 +86,15 @@ def classification_to_evidence(record: dict[str, Any]) -> list[Evidence]:
             metric="compliance_violation_flag",
             value=1.0,
             source="classification",
+            labels=common_labels,
+            metadata=common_metadata,
+        ))
+    elif class_name in _SEMANTIC_TIER_CLASSES:
+        tier_name = class_name.replace("semantic_tier_", "")
+        results.append(Evidence(
+            metric=f"semantic_tier_{tier_name}_ratio",
+            value=confidence,
+            source="semantic_routing",
             labels=common_labels,
             metadata=common_metadata,
         ))
