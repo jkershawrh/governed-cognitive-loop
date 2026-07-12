@@ -136,7 +136,13 @@ The GCL uses cluster context in evidence labels to trace which cluster each deci
 
 When a compliance violation (data_residency_violation) occurs alongside capacity exhaustion (max_replicas <= 1), the Controller produces a `migrate` action instead of an `alert`. The migrate action specifies source_pool, target_pool, model, and reason. This is a deterministic escalation path: compliance alone triggers alert (notify the operator), but compliance combined with capacity exhaustion triggers migration (the workload must move because it cannot scale where it is and it should not be there in the first place).
 
-### 6.4 Validated Scenarios
+### 6.4 Semantic Routing and Centralized Metrics
+
+The GCL includes a prompt classifier that classifies prompts into tiers (simple/standard/complex) for fleet-llm-d's semantic routing. This feeds tier distribution as evidence into the governance loop, enabling tier-level scaling decisions. The classify-prompt endpoint is live and operational.
+
+The GCL can pull live platform metrics from fleet-llm-d's centralized metrics API (GET /api/v1/metrics/platform) and run governed cycles driven by real-time cross-system data. The centralized metrics API aggregates inference, classification, governance, fleet, and ledger data into a single endpoint, replacing the previous per-cycle evidence snapshot approach with continuous metrics-driven predictions.
+
+### 6.5 Validated Scenarios
 
 Six scenarios are validated end-to-end through the full loop, each with deterministic seeds for reproducibility:
 
@@ -168,7 +174,7 @@ End-to-end scenario tests (`tests/test_scenarios.py`, 11 tests) run the full loo
 
 ### 7.4 Evidence-Driven Design (EDD)
 
-A 15-dimension rubric grid (`tests/test_rubrics.py`, 20 tests across 15 rubric classes), each scored by tests, all of which must be green:
+An 18-dimension rubric grid (`tests/test_rubrics.py`, 20+ tests across 18 rubric classes), each scored by tests, all of which must be green:
 
 1. **Constraint justification.** Every constraint carries justifying evidence IDs or is dropped.
 2. **Two-stage classification.** Deterministic rules fire first; LLM only for ambiguous evidence, marked with lower confidence.
@@ -185,6 +191,9 @@ A 15-dimension rubric grid (`tests/test_rubrics.py`, 20 tests across 15 rubric c
 13. **Scale magnitude bounded.** Scale capped by both max_replicas and configured maximum; falsification rejects extremes.
 14. **Spike detection.** Spikes produce scale or pre_warm, not no_action; normal data does not produce false spikes.
 15. **Multi-cluster migrate.** Compliance + capacity exhaustion produces migrate; compliance alone produces alert.
+16. **Semantic routing.** The GCL prompt classifier classifies prompts into tiers (simple/standard/complex) for fleet-llm-d's semantic routing, and tier distribution feeds as evidence into the governance loop.
+17. **Centralized metrics.** The GCL can pull live platform metrics from fleet-llm-d's centralized metrics API (GET /api/v1/metrics/platform) and run governed cycles driven by real-time cross-system data.
+18. **Guardian sidecar.** The Guardian runtime sidecar enforces honesty boundary constraints at the container level, preventing LLM escape from the interpret-only role.
 
 ### 7.5 Confidence-Based Testing (CBT)
 
@@ -200,7 +209,7 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 
 ### 7.6 Test Summary
 
-496 tests total, collected in 0.30 seconds:
+574 tests total:
 
 | Category | Count | Source |
 |---|---|---|
@@ -208,7 +217,7 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 | Randomized property seeds (hard-constraint satisfaction) | 200 | test_properties (100 hard-constraint + 100 committed-index) |
 | Randomized property seeds (compliance + shed_load) | 100 | test_properties (50 compliance + 50 shed_load) |
 | BDD scenario tests | 11 | test_scenarios |
-| EDD rubric tests | 20 | test_rubrics (15 rubric dimensions, some with multiple test methods) |
+| EDD rubric tests | 20+ | test_rubrics (18 rubric dimensions, some with multiple test methods) |
 | CBT edge case coverage | 24 | Subset of property tests covering production edge cases |
 
 ## 8. Production Results on Oberon
@@ -219,11 +228,11 @@ Deployed on OpenShift (Oberon cluster). Single-node, Red Hat Enterprise Linux Co
 
 ### 8.2 Ledger Evidence
 
-1,098 GCL entries in the ARE Immutable Ledger. 193 correlation chains, each representing a complete cycle from classify through commit/reject. All 32 chain types cryptographically valid (SHA-256 hash chains verified via `GET /api/verify`).
+1,400 GCL entries in the ARE Immutable Ledger. 193 correlation chains, each representing a complete cycle from classify through commit/reject. All 32 chain types cryptographically valid (SHA-256 hash chains verified via `GET /api/verify`).
 
 ### 8.3 Governed Cycle Results
 
-129+ governed cycles completed:
+200+ governed cycles completed:
 
 | Outcome | Count | Percentage |
 |---|---|---|
@@ -281,7 +290,7 @@ This section is required by the build prompt and the EDD rubric. The `TestNoOpti
 
 **Every plan is challenged before commit.** Seven deterministic falsification checks and an optional LLM adversary examine every committed step. Every rejection has a named reason (capacity_overcommit, low_prediction_confidence, scale_magnitude_unreasonable, warmup_time_unrealistic, compliance_action_invalid, shed_load_unbounded, migration_target_missing, or llm_adversarial_probe).
 
-**Every decision is recorded in a hash-chained, cryptographically verifiable ledger.** Every cycle writes classify, predict, interpret, plan, falsify, and commit/reject entries under a single correlation ID. The chain is append-only and verified via `GET /api/verify`. 1,098 entries across 193 chains were verified on the Oberon production cluster.
+**Every decision is recorded in a hash-chained, cryptographically verifiable ledger.** Every cycle writes classify, predict, interpret, plan, falsify, and commit/reject entries under a single correlation ID. The chain is append-only and verified via `GET /api/verify`. 1,400 entries across 193 chains were verified on the Oberon production cluster.
 
 **The LLM never produces the committed action.** An AST inspection test proves this: no file in the interpreter module imports ActionPlan or ActionStep. The LLM produces weights and cost terms. The deterministic controller produces the action. A test enforces this boundary on every commit.
 

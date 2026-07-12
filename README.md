@@ -53,13 +53,15 @@ Every governed cycle follows this chain:
 
 | Metric | Value |
 |---|---|
-| Tests | 496 (unit + property + BDD + EDD) |
-| EDD rubric dimensions | 15/15 green |
+| Tests | 574 (unit + property + BDD + EDD) |
+| EDD rubric dimensions | 18/18 green |
 | Scenarios | 6 (inference spike, compliance, capacity exhaustion, SLO cascade, mixed storm, multi-cluster) |
 | Edge case simulations | 24/24 pass, 0 crashes, 4/4 behavioral correctness |
-| Ledger entries (Oberon) | 1,098 GCL entries, all chains cryptographically valid |
-| Governed cycles | 129+ (96 committed, 33 rejected with named reasons) |
+| Ledger entries (Oberon) | 1,400 (1,272 GCL), all chains cryptographically valid |
+| Governed cycles | 200+ committed and rejected with named reasons |
 | Composite confidence | 85% for CPU inference scaling |
+| Semantic routing | Prompt classification into simple/standard/complex tiers (classify-prompt endpoint live) |
+| Centralized metrics | Platform metrics API live (GET /api/v1/metrics/platform) |
 
 See [benchmarks](docs/benchmarks/gcl-benchmarks.md) and [white paper](docs/whitepaper/governed-cognitive-loop-whitepaper.md) for details.
 

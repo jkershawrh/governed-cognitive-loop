@@ -19,11 +19,11 @@
 | Classification adapter tests | 9 | ClassificationRecord to Evidence conversion |
 | Scenario engine tests | 16 | 6 scenario types validated |
 | API endpoint tests | 12 | REST API contract tests |
-| **Total** | **496** | **All green** |
+| **Total** | **574** | **All green** |
 
 ---
 
-## 2. EDD Rubric Grid (15/15 Green)
+## 2. EDD Rubric Grid (18/18 Green)
 
 | # | Dimension | Test Class | What It Proves |
 |---|---|---|---|
@@ -42,6 +42,9 @@
 | 13 | scale_magnitude_bounded | TestScaleMagnitudeBounded | Optimizer caps replicas, falsification rejects extremes |
 | 14 | spike_detection | TestSpikeDetection | Spike pattern produces trajectory reflecting peak, normal data unaffected |
 | 15 | multi_cluster_migrate | TestMultiClusterMigrate | Compliance + capacity exhaustion = migrate, compliance alone = alert |
+| 16 | semantic_routing | TestSemanticRouting | Prompt classifier produces valid tier (simple/standard/complex), tier distribution feeds evidence |
+| 17 | centralized_metrics | TestCentralizedMetrics | Platform metrics API returns cross-system data, GCL cycles driven by real-time metrics |
+| 18 | guardian_sidecar | TestGuardianSidecar | Guardian runtime sidecar enforces honesty boundary at container level |
 
 ---
 
@@ -105,8 +108,8 @@
 
 | Metric | Value |
 |---|---|
-| GCL entries | 1,098 |
-| Total ledger entries | 1,223 |
+| GCL entries | 1,272 |
+| Total ledger entries | 1,400 |
 | Correlation chains | 193 |
 | Chain types | 32 |
 | All chains valid | Yes (SHA-256 hash-chain verified) |

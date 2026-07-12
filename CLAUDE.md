@@ -13,8 +13,8 @@ pip install -e ".[dev]"
 ## Test
 
 ```bash
-python3 -m pytest tests/ -q                    # 496 tests
-python3 -m pytest tests/test_rubrics.py -v     # 15/15 EDD rubric
+python3 -m pytest tests/ -q                    # 574 tests
+python3 -m pytest tests/test_rubrics.py -v     # 18/18 EDD rubric
 ```
 
 ## Verify (full suite)
