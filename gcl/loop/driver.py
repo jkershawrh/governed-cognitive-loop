@@ -146,6 +146,30 @@ class LoopDriver:
                 correlation_id=correlation_id,
             )
 
+        # Authority gate: check with agent-promotion-line
+        from gcl.loop.authority import check_authority
+        authority = await check_authority(committed_step.action_type, correlation_id)
+        if authority.get("verdict") == "refuse":
+            await self._ledger.write_entry(
+                "gcl.authority_refused",
+                {
+                    "action_type": committed_step.action_type,
+                    "consequence_score": authority.get("consequence_score", 0),
+                    "ceiling": authority.get("ceiling", 0),
+                    "reason": authority.get("reason", ""),
+                },
+                correlation_id,
+            )
+            return LoopCycle(
+                constraints_snapshot=constraints,
+                trajectory=trajectory,
+                objective=objective,
+                action_plan=action_plan,
+                falsification=None,
+                committed=False,
+                correlation_id=correlation_id,
+            )
+
         falsification = await self._gate.falsify(
             committed_step, trajectory, constraints, signals,
         )

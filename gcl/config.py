@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     ledger_url: str = ""
     fleet_url: str = ""
     fleet_token: str = ""
+    authority_url: str = ""
+    authority_agent_id: str = "governed-cognitive-loop"
     force_deterministic: bool = False
 
     model_config = {"env_prefix": "GCL_"}
