@@ -158,7 +158,11 @@ After an action is committed and sent to fleet-llm-d, the GCL closes the loop wi
 
 **Time-aware constraints (maintenance windows).** The constraint classifier recognizes time-based evidence (maintenance windows, restricted scaling periods, time-of-day policies). When a maintenance window is active, the classifier produces a hard time constraint that prevents actuation. This ensures the GCL does not scale or migrate during scheduled downtime, even if SLO metrics indicate a breach.
 
-### 6.6 Validated Scenarios
+### 6.6 Authority Gate
+
+The GCL is wired to the agent-promotion-line's AuthorityGate. Before committing any action, the GCL checks whether its consequence score is within its earned authority ceiling. The promotion line reads gcl.outcome entries from the ARE ledger to compute the GCL's track record: commits with effective=true are successes, effective=false are failures. The GCL's authority tier (T0 PROBATION through T4 PRINCIPAL) rises and falls based on this record. Demotion is always immediate. Promotion into high-consequence tiers can require human ratification.
+
+### 6.7 Validated Scenarios
 
 Six scenarios are validated end-to-end through the full loop, each with deterministic seeds for reproducibility:
 
@@ -231,7 +235,7 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 
 ### 7.6 Test Summary
 
-776 tests total:
+782 tests total:
 
 | Category | Count | Source |
 |---|---|---|

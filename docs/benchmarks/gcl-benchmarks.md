@@ -19,7 +19,7 @@
 | Classification adapter tests | 9 | ClassificationRecord to Evidence conversion |
 | Scenario engine tests | 16 | 6 scenario types validated |
 | API endpoint tests | 12 | REST API contract tests |
-| **Total** | **776** | **All green** |
+| **Total** | **782** | **All green** |
 
 ---
 

@@ -54,7 +54,7 @@ Every governed cycle follows this chain:
 
 | Metric | Value |
 |---|---|
-| Tests | 776 (unit + property + BDD + EDD) |
+| Tests | 782 (unit + property + BDD + EDD) |
 | EDD rubric dimensions | 24/24 green |
 | Scenarios | 6 (inference spike, compliance, capacity exhaustion, SLO cascade, mixed storm, multi-cluster) |
 | Edge case simulations | 24/24 pass, 0 crashes, 4/4 behavioral correctness |
@@ -66,6 +66,7 @@ Every governed cycle follows this chain:
 | Time-aware constraints | Maintenance window enforcement, time-of-day scaling policy |
 | Chaos resilience | gcl.cycle_start entries, graceful degradation under component failure |
 | Decision cooldown | 60-second default cooldown prevents action oscillation between cycles |
+| Authority gate | Wired to agent-promotion-line (consequence-based authority, track record from ledger) |
 | Semantic routing | Prompt classification into simple/standard/complex tiers (classify-prompt endpoint live) |
 | Centralized metrics | Platform metrics API live (GET /api/v1/metrics/platform) |
 
