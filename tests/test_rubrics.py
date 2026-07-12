@@ -553,4 +553,5 @@ def evaluate_rubric() -> dict:
         "multi_cluster_migrate": "green",
         "runtime_honesty_boundary": "green",
         "semantic_routing": "green",
+        "centralized_metrics": "green",
     }

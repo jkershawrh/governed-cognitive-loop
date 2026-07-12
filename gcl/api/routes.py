@@ -195,6 +195,36 @@ async def classify_prompt(request: dict) -> dict:
     return result.model_dump()
 
 
+@router.post("/cycle/metrics")
+async def cycle_from_metrics() -> CycleResponse:
+    """Pull live platform metrics from fleet-llm-d and run a governed cycle."""
+    from gcl.loop.signals import FleetMetricsSignalSource
+    source = FleetMetricsSignalSource()
+    signals = source.measure()
+
+    if not signals:
+        raise HTTPException(status_code=503, detail="No metrics available from fleet-llm-d")
+
+    cycle = await _driver.run_cycle(signals)
+    _cycles[str(cycle.cycle_id)] = cycle
+
+    action_type = None
+    if cycle.action_plan is not None:
+        committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+        action_type = committed.action_type
+    verdict = None
+    if cycle.falsification is not None:
+        verdict = cycle.falsification.verdict.value
+
+    return CycleResponse(
+        cycle_id=str(cycle.cycle_id),
+        correlation_id=cycle.correlation_id,
+        committed=cycle.committed,
+        action_type=action_type,
+        falsification_verdict=verdict,
+    )
+
+
 class ClassificationCycleRequest(BaseModel):
     classifications: list[dict]
     additional_signals: list[dict] = []
