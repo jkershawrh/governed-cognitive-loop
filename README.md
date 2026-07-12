@@ -48,18 +48,24 @@ Every governed cycle follows this chain:
 | `shed_load` | Capacity exhausted, latency breached | fleet-llm-d ShedLoadIntent |
 | `alert` | Compliance constraint active | fleet-llm-d AlertIntent |
 | `migrate` | Compliance + capacity exhaustion (cross-cluster) | fleet-llm-d MigrateIntent |
+| `rollback` | Actuation verification failure or outcome drift | fleet-llm-d RollbackIntent |
 
 ## Verified Results
 
 | Metric | Value |
 |---|---|
-| Tests | 574 (unit + property + BDD + EDD) |
-| EDD rubric dimensions | 18/18 green |
+| Tests | 776 (unit + property + BDD + EDD) |
+| EDD rubric dimensions | 24/24 green |
 | Scenarios | 6 (inference spike, compliance, capacity exhaustion, SLO cascade, mixed storm, multi-cluster) |
 | Edge case simulations | 24/24 pass, 0 crashes, 4/4 behavioral correctness |
 | Ledger entries (Oberon) | 1,400 (1,272 GCL), all chains cryptographically valid |
 | Governed cycles | 200+ committed and rejected with named reasons |
-| Composite confidence | 85% for CPU inference scaling |
+| Composite confidence | 99% for CPU inference scaling |
+| Post-commit verification | Outcome ledger (gcl.outcome), decision cooldown (60s default), fleet response tracking |
+| Actuation verification | gcl.actuation_verified entries confirm fleet-llm-d accepted and executed intents |
+| Time-aware constraints | Maintenance window enforcement, time-of-day scaling policy |
+| Chaos resilience | gcl.cycle_start entries, graceful degradation under component failure |
+| Decision cooldown | 60-second default cooldown prevents action oscillation between cycles |
 | Semantic routing | Prompt classification into simple/standard/complex tiers (classify-prompt endpoint live) |
 | Centralized metrics | Platform metrics API live (GET /api/v1/metrics/platform) |
 

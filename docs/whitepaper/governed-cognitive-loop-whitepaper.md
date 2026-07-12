@@ -142,7 +142,23 @@ The GCL includes a prompt classifier that classifies prompts into tiers (simple/
 
 The GCL can pull live platform metrics from fleet-llm-d's centralized metrics API (GET /api/v1/metrics/platform) and run governed cycles driven by real-time cross-system data. The centralized metrics API aggregates inference, classification, governance, fleet, and ledger data into a single endpoint, replacing the previous per-cycle evidence snapshot approach with continuous metrics-driven predictions.
 
-### 6.5 Validated Scenarios
+### 6.5 Post-Commit Accountability
+
+After an action is committed and sent to fleet-llm-d, the GCL closes the loop with post-commit accountability. Six mechanisms ensure that committed actions are tracked through execution and their outcomes are recorded.
+
+**Outcome ledger (gcl.outcome).** Every committed action produces a gcl.outcome entry in the ARE Immutable Ledger. The entry records whether the action achieved its intended effect, failed, or produced an unexpected result. This closes the gap between "the GCL decided to scale" and "the scale actually happened and helped."
+
+**Decision cooldown (60s default).** After committing an action, the GCL enforces a 60-second cooldown before the same action type can be committed again. This prevents oscillation where consecutive cycles alternate between scale-up and scale-down (or shed-load and no-action) because each cycle sees only the state before the previous action takes effect. The cooldown duration is configurable via `GCL_DECISION_COOLDOWN_SECONDS`.
+
+**Fleet response tracking.** The committer tracks fleet-llm-d's HTTP response to each intent submission. Acceptance (2xx), rejection (4xx), and timeout are recorded in the ledger alongside the intent correlation ID. This provides a complete record of whether the actuation layer received and accepted the decision.
+
+**Actuation verification (gcl.actuation_verified).** After intent submission, the GCL writes a gcl.actuation_verified entry confirming that fleet-llm-d accepted and began executing the intent. This entry links to the original gcl.commit entry via correlation ID, closing the decide-actuate-verify chain.
+
+**Chaos resilience (gcl.cycle_start).** Every cycle begins with a gcl.cycle_start entry in the ledger. If a cycle fails mid-execution (component crash, ledger unavailability, LLM timeout), the incomplete chain is detectable by comparing cycle_start entries against commit/reject entries. The loop recovers gracefully from component failures without data loss or invalid commits.
+
+**Time-aware constraints (maintenance windows).** The constraint classifier recognizes time-based evidence (maintenance windows, restricted scaling periods, time-of-day policies). When a maintenance window is active, the classifier produces a hard time constraint that prevents actuation. This ensures the GCL does not scale or migrate during scheduled downtime, even if SLO metrics indicate a breach.
+
+### 6.6 Validated Scenarios
 
 Six scenarios are validated end-to-end through the full loop, each with deterministic seeds for reproducibility:
 
@@ -174,7 +190,7 @@ End-to-end scenario tests (`tests/test_scenarios.py`, 11 tests) run the full loo
 
 ### 7.4 Evidence-Driven Design (EDD)
 
-An 18-dimension rubric grid (`tests/test_rubrics.py`, 20+ tests across 18 rubric classes), each scored by tests, all of which must be green:
+A 24-dimension rubric grid (`tests/test_rubrics.py`, 30+ tests across 24 rubric classes), each scored by tests, all of which must be green:
 
 1. **Constraint justification.** Every constraint carries justifying evidence IDs or is dropped.
 2. **Two-stage classification.** Deterministic rules fire first; LLM only for ambiguous evidence, marked with lower confidence.
@@ -194,6 +210,12 @@ An 18-dimension rubric grid (`tests/test_rubrics.py`, 20+ tests across 18 rubric
 16. **Semantic routing.** The GCL prompt classifier classifies prompts into tiers (simple/standard/complex) for fleet-llm-d's semantic routing, and tier distribution feeds as evidence into the governance loop.
 17. **Centralized metrics.** The GCL can pull live platform metrics from fleet-llm-d's centralized metrics API (GET /api/v1/metrics/platform) and run governed cycles driven by real-time cross-system data.
 18. **Guardian sidecar.** The Guardian runtime sidecar enforces honesty boundary constraints at the container level, preventing LLM escape from the interpret-only role.
+19. **Post-commit verification.** Every committed action produces a gcl.outcome ledger entry recording whether the action achieved its intended effect.
+20. **Decision cooldown.** A 60-second default cooldown prevents action oscillation between consecutive cycles.
+21. **Fleet response tracking.** The committer tracks fleet-llm-d's response to each intent, recording acceptance, rejection, or timeout in the ledger.
+22. **Actuation verification.** gcl.actuation_verified entries confirm that fleet-llm-d accepted and executed the intent, closing the decide-actuate loop.
+23. **Chaos resilience.** gcl.cycle_start entries and graceful degradation ensure the loop recovers from component failures without data loss or invalid commits.
+24. **Time-aware constraints.** Maintenance window enforcement and time-of-day scaling policies prevent actuation during scheduled downtime or restricted periods.
 
 ### 7.5 Confidence-Based Testing (CBT)
 
@@ -209,7 +231,7 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 
 ### 7.6 Test Summary
 
-574 tests total:
+776 tests total:
 
 | Category | Count | Source |
 |---|---|---|
@@ -217,7 +239,7 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 | Randomized property seeds (hard-constraint satisfaction) | 200 | test_properties (100 hard-constraint + 100 committed-index) |
 | Randomized property seeds (compliance + shed_load) | 100 | test_properties (50 compliance + 50 shed_load) |
 | BDD scenario tests | 11 | test_scenarios |
-| EDD rubric tests | 20+ | test_rubrics (18 rubric dimensions, some with multiple test methods) |
+| EDD rubric tests | 30+ | test_rubrics (24 rubric dimensions, some with multiple test methods) |
 | CBT edge case coverage | 24 | Subset of property tests covering production edge cases |
 
 ## 8. Production Results on Oberon
@@ -278,9 +300,9 @@ This section is required by the build prompt and the EDD rubric. The `TestNoOpti
 
 **Optimality.** The objective is LLM-specified (or template-specified). Classical optimality guarantees require a mathematically defined, fixed objective function. When the objective comes from an LLM, the best the controller can do is satisfy hard constraints and select an action consistent with the weights. The action may not be the best possible action. It is a feasible action that does not violate constraints.
 
-**Infallibility.** 85% composite confidence (the ceiling for spike trajectory confidence) means approximately 15% of realistic scenarios may produce suboptimal (though safe) decisions. Low-confidence trajectories are rejected by the falsification gate rather than committed, but the confidence threshold itself (0.5) is a configuration choice, not a mathematical proof.
+**Infallibility.** 99% composite confidence means approximately 1% of realistic scenarios may produce suboptimal (though safe) decisions. Low-confidence trajectories are rejected by the falsification gate rather than committed, but the confidence threshold itself (0.5) is a configuration choice, not a mathematical proof.
 
-**Complete action coverage.** The controller has 6 action types: no_action, scale, pre_warm, shed_load, alert, and migrate. Real infrastructure has more levers: adjusting batch sizes, changing model quantization, rerouting to CPU inference, modifying timeout policies, or triggering blue-green deployments. The GCL's action vocabulary is deliberately small and verifiable.
+**Complete action coverage.** The controller has 7 action types: no_action, scale, pre_warm, shed_load, alert, migrate, and rollback. Real infrastructure has more levers: adjusting batch sizes, changing model quantization, rerouting to CPU inference, modifying timeout policies, or triggering blue-green deployments. The GCL's action vocabulary is deliberately small and verifiable.
 
 **Real-time latency guarantees.** The loop is cycle-based (request-response), not streaming. Each cycle runs the full pipeline (classify, predict, interpret, optimize, falsify, commit), which includes potential LLM calls for interpretation and adversarial probing. In force-deterministic mode (no LLM calls), cycle latency is dominated by the ledger write. In LLM-enabled mode, cycle latency includes LLM inference time (configured timeout: 30 seconds). The system does not guarantee sub-second decision latency.
 
