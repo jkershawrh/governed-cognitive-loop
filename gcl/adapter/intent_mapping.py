@@ -51,6 +51,12 @@ class MigrateIntent(FleetIntent):
     reason: str = ""
 
 
+class RollbackIntent(FleetIntent):
+    type: str = "rollback"
+    original_action: str = ""
+    reason: str = ""
+
+
 def map_action_to_intent(
     action_step: ActionStep, correlation_id: str = ""
 ) -> Optional[FleetIntent]:
@@ -100,6 +106,14 @@ def map_action_to_intent(
             source_pool=str(params.get("source_pool", "default")),
             target_pool=str(params.get("target_pool", "")),
             model=str(params.get("model", "default")),
+            reason=str(params.get("reason", "")),
+            state_snapshot={"correlation_id": correlation_id},
+        )
+
+    if action_step.action_type == "rollback":
+        return RollbackIntent(
+            justification=justification,
+            original_action=str(params.get("original_action", "")),
             reason=str(params.get("reason", "")),
             state_snapshot={"correlation_id": correlation_id},
         )

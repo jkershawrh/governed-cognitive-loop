@@ -121,4 +121,5 @@ class LoopCycle(BaseModel):
     action_plan: Optional[ActionPlan] = None
     falsification: Optional[FalsificationResult] = None
     committed: bool = False
+    fleet_response: Optional[dict] = None
     correlation_id: str

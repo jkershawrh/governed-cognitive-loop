@@ -7,9 +7,11 @@ from gcl.classifier.classifier import ConstraintClassifier
 from gcl.committer.committer import Committer
 from gcl.config import get_settings
 from gcl.controller.controller import Controller
-from gcl.domain.contracts import Evidence, LoopCycle
+from gcl.domain.contracts import ActionPlan, ActionStep, Evidence, FalsificationResult, LoopCycle
+from gcl.domain.enums import Verdict
 from gcl.falsification.gate import FalsificationGate
 from gcl.interpreter.interpreter import ObjectiveInterpreter
+from gcl.loop.accountability import AccountabilityTracker
 from gcl.loop.ledger import LedgerClient
 from gcl.predictor.predictor import HorizonPredictor
 
@@ -25,6 +27,7 @@ class LoopDriver:
         committer: Optional[Committer] = None,
         ledger: Optional[LedgerClient] = None,
         adapter: Optional[object] = None,
+        accountability: Optional[AccountabilityTracker] = None,
     ):
         self._classifier = classifier or ConstraintClassifier()
         self._predictor = predictor or HorizonPredictor()
@@ -34,10 +37,27 @@ class LoopDriver:
         self._committer = committer or Committer()
         self._ledger = ledger or LedgerClient()
         self._adapter = adapter
+        self._accountability = accountability or AccountabilityTracker()
 
     async def run_cycle(self, signals: list[Evidence]) -> LoopCycle:
         settings = get_settings()
         correlation_id = f"gcl-{uuid4()}"
+
+        # Check outcomes from previous commits
+        outcomes = self._accountability.check_outcomes(signals)
+        for outcome in outcomes:
+            await self._ledger.write_entry(
+                "gcl.outcome",
+                {
+                    "action_type": outcome.commit.action_type,
+                    "cycle_id": outcome.commit.cycle_id,
+                    "metric_before": outcome.metric_before,
+                    "metric_after": outcome.metric_after,
+                    "effective": outcome.effective,
+                    "elapsed_ms": outcome.elapsed_ms,
+                },
+                correlation_id,
+            )
 
         constraints = await self._classifier.classify(signals)
         await self._ledger.write_entry(
@@ -87,6 +107,39 @@ class LoopDriver:
             )
 
         committed_step = action_plan.steps[action_plan.committed_step_index]
+
+        # Check cooldown before committing
+        can_commit, cooldown_reason = self._accountability.can_commit(committed_step.action_type)
+        if not can_commit:
+            await self._ledger.write_entry(
+                "gcl.cooldown",
+                {"action_type": committed_step.action_type, "reason": cooldown_reason},
+                correlation_id,
+            )
+            # Override to no_action
+            no_op_step = ActionStep(
+                step_index=0,
+                action_type="no_action",
+                parameters={"cooldown_reason": cooldown_reason},
+            )
+            no_op_plan = ActionPlan(
+                steps=[no_op_step] + [
+                    ActionStep(step_index=i, action_type="no_action", parameters={})
+                    for i in range(1, action_plan.horizon_steps)
+                ],
+                committed_step_index=0,
+                horizon_steps=action_plan.horizon_steps,
+            )
+            return LoopCycle(
+                constraints_snapshot=constraints,
+                trajectory=trajectory,
+                objective=objective,
+                action_plan=no_op_plan,
+                falsification=None,
+                committed=False,
+                correlation_id=correlation_id,
+            )
+
         falsification = await self._gate.falsify(
             committed_step, trajectory, constraints, signals,
         )
@@ -96,9 +149,29 @@ class LoopDriver:
             correlation_id,
         )
 
-        did_commit = await self._committer.commit(
+        commit_result = await self._committer.commit(
             committed_step, falsification, self._adapter, self._ledger, correlation_id,
         )
+
+        did_commit = commit_result["committed"]
+        fleet_response = commit_result["fleet_response"]
+
+        # Extract primary latency from signals
+        latency_at_commit = 0.0
+        for s in signals:
+            if s.metric == "latency_ms":
+                latency_at_commit = s.value
+                break
+
+        # Record the commit for accountability tracking
+        if did_commit:
+            self._accountability.record_commit(
+                cycle_id=str(correlation_id),
+                correlation_id=correlation_id,
+                action_type=committed_step.action_type,
+                latency_at_commit=latency_at_commit,
+                fleet_response=fleet_response,
+            )
 
         return LoopCycle(
             constraints_snapshot=constraints,
@@ -107,5 +180,6 @@ class LoopDriver:
             action_plan=action_plan,
             falsification=falsification,
             committed=did_commit,
+            fleet_response=fleet_response,
             correlation_id=correlation_id,
         )

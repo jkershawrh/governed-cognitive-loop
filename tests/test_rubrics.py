@@ -510,6 +510,65 @@ class TestRuntimeHonestyBoundary:
         assert validated is not None, "Guardian should allow ObjectiveSpec responses"
 
 
+class TestDecisionCooldown:
+    """Green: cooldown prevents repeated commits of the same action type within the window."""
+
+    def test_cooldown_blocks_repeat_commit(self):
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker.record_commit("c1", "corr1", "scale", 8000.0)
+        allowed, reason = tracker.can_commit("scale")
+        assert not allowed, "Cooldown should block repeat scale"
+        assert "cooldown" in reason
+
+    def test_cooldown_allows_after_expiry(self):
+        import time
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker.record_commit("c1", "corr1", "scale", 8000.0)
+        tracker._recent_commits[-1].committed_at = time.time() - 120
+        allowed, _ = tracker.can_commit("scale")
+        assert allowed, "Cooldown should allow after expiry"
+
+
+class TestOutcomeTracking:
+    """Green: committed actions are tracked and outcomes verified against expectations."""
+
+    def test_scale_outcome_effective_when_latency_drops(self):
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker._outcome_min_age_seconds = 0
+        tracker.record_commit("c1", "corr1", "scale", 8000.0)
+        evidence = [Evidence(metric="latency_ms", value=3500.0)]
+        outcomes = tracker.check_outcomes(evidence)
+        assert len(outcomes) == 1
+        assert outcomes[0].effective is True
+
+    def test_no_action_produces_no_outcome(self):
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker.record_commit("c1", "corr1", "no_action", 3000.0)
+        assert tracker.pending_count() == 0
+
+
+class TestFleetResponseAccountability:
+    """Green: fleet refused intents do not create pending outcomes; accepted intents do."""
+
+    def test_refused_intent_no_outcome(self):
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker.record_commit("c1", "corr1", "scale", 8000.0,
+                            fleet_response={"status": "refused", "reason": "policy"})
+        assert tracker.pending_count() == 0
+
+    def test_accepted_intent_creates_outcome(self):
+        from gcl.loop.accountability import AccountabilityTracker
+        tracker = AccountabilityTracker()
+        tracker.record_commit("c1", "corr1", "scale", 8000.0,
+                            fleet_response={"status": "executed"})
+        assert tracker.pending_count() == 1
+
+
 class TestSemanticRouting:
     """Green: prompts classified by tier, models mapped per tier."""
 
@@ -554,4 +613,7 @@ def evaluate_rubric() -> dict:
         "runtime_honesty_boundary": "green",
         "semantic_routing": "green",
         "centralized_metrics": "green",
+        "decision_cooldown": "green",
+        "outcome_tracking": "green",
+        "fleet_response_accountability": "green",
     }

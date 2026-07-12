@@ -6,6 +6,7 @@ import pytest
 
 from gcl.domain.contracts import Evidence
 from gcl.domain.enums import Verdict
+from gcl.loop.accountability import AccountabilityTracker
 from gcl.loop.driver import LoopDriver
 from gcl.loop.ledger import LedgerClient
 from gcl.scenario.engine import ScenarioEngine
@@ -250,3 +251,103 @@ class TestMultiClusterMigrationBDD:
             assert committed.action_type in ("alert", "migrate"), (
                 f"Step 4 should produce alert or migrate, got {committed.action_type}"
             )
+
+
+class TestCooldownPreventsDuplicateScaleBDD:
+    """Given a scale action was recently committed, when the loop runs again
+    with the same breach, then the cooldown prevents a duplicate scale action."""
+
+    @pytest.mark.asyncio
+    async def test_cooldown_blocks_repeat_scale(self, ledger):
+        tracker = AccountabilityTracker()
+        driver = LoopDriver(ledger=ledger, accountability=tracker)
+
+        signals = (
+            [Evidence(metric="latency_ms", value=8000.0) for _ in range(5)]
+            + [Evidence(metric="replicas", value=3.0)]
+            + [Evidence(metric="max_replicas", value=10.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle1 = await driver.run_cycle(signals)
+
+        # First cycle should commit (scale or similar)
+        if cycle1.committed and cycle1.action_plan is not None:
+            first_action = cycle1.action_plan.steps[0].action_type
+            if first_action != "no_action":
+                # Second cycle with same signals should be blocked by cooldown
+                with p1, p2, p3:
+                    cycle2 = await driver.run_cycle(signals)
+                if cycle2.action_plan is not None:
+                    second_action = cycle2.action_plan.steps[0].action_type
+                    assert second_action == "no_action", (
+                        f"Cooldown should block repeat {first_action}, got {second_action}"
+                    )
+
+
+class TestOutcomeTrackingAfterScaleBDD:
+    """Given a scale action was committed and latency subsequently dropped,
+    when the next cycle runs, then the outcome is marked as effective."""
+
+    @pytest.mark.asyncio
+    async def test_effective_outcome_after_scale(self, ledger):
+        tracker = AccountabilityTracker()
+        tracker._outcome_min_age_seconds = 0  # immediate checking for test
+        driver = LoopDriver(ledger=ledger, accountability=tracker)
+
+        high_signals = (
+            [Evidence(metric="latency_ms", value=8000.0) for _ in range(5)]
+            + [Evidence(metric="replicas", value=3.0)]
+            + [Evidence(metric="max_replicas", value=10.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle1 = await driver.run_cycle(high_signals)
+
+        if cycle1.committed:
+            # Simulate recovery: latency drops
+            low_signals = (
+                [Evidence(metric="latency_ms", value=3000.0) for _ in range(5)]
+                + [Evidence(metric="replicas", value=6.0)]
+                + [Evidence(metric="max_replicas", value=10.0)]
+            )
+            with p1, p2, p3:
+                cycle2 = await driver.run_cycle(low_signals)
+
+            # Verify outcome was logged
+            entries = await ledger.query_chain(cycle2.correlation_id)
+            entry_types = {e["entry_type"] for e in entries}
+            assert "gcl.outcome" in entry_types, (
+                "Outcome entry should be written after scale + recovery"
+            )
+
+
+class TestFleetResponseCapturedBDD:
+    """Given a fleet adapter returns a response, when the loop commits,
+    then the fleet response is captured on the LoopCycle."""
+
+    @pytest.mark.asyncio
+    async def test_fleet_response_on_cycle(self, ledger):
+        from unittest.mock import AsyncMock, MagicMock
+        mock_adapter = MagicMock()
+        mock_adapter.actuate = AsyncMock(return_value={
+            "status": "executed",
+            "intent_id": "fleet-123",
+        })
+
+        driver = LoopDriver(ledger=ledger, adapter=mock_adapter)
+
+        signals = (
+            [Evidence(metric="latency_ms", value=8000.0) for _ in range(5)]
+            + [Evidence(metric="replicas", value=3.0)]
+            + [Evidence(metric="max_replicas", value=10.0)]
+        )
+        p1, p2, p3 = _force_deterministic()
+        with p1, p2, p3:
+            cycle = await driver.run_cycle(signals)
+
+        if cycle.committed:
+            assert cycle.fleet_response is not None, (
+                "Fleet response should be captured on LoopCycle"
+            )
+            assert cycle.fleet_response["status"] == "executed"

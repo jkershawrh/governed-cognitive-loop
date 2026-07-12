@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     capacity_headroom_fraction: float = Field(default=0.1, ge=0.0, le=1.0)
     max_scale_replicas: int = Field(default=20, gt=0)
     spike_detection_threshold: float = Field(default=2.0, gt=1.0)
+    decision_cooldown_seconds: int = Field(default=60, ge=0)
+    max_pending_outcomes: int = Field(default=10, ge=1)
 
     llm_api_base: str = ""
     llm_api_key: str = ""

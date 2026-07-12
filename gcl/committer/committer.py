@@ -15,10 +15,11 @@ class Committer:
         adapter: Optional[object],
         ledger: LedgerClient,
         correlation_id: str,
-    ) -> bool:
+    ) -> dict:
         if falsification.verdict == Verdict.SURVIVES:
+            adapter_result = None
             if adapter is not None and hasattr(adapter, "actuate"):
-                await adapter.actuate(action_step, correlation_id)
+                adapter_result = await adapter.actuate(action_step, correlation_id)
 
             await ledger.write_entry(
                 "gcl.commit",
@@ -29,7 +30,7 @@ class Committer:
                 },
                 correlation_id,
             )
-            return True
+            return {"committed": True, "fleet_response": adapter_result}
         else:
             await ledger.write_entry(
                 "gcl.reject",
@@ -42,4 +43,4 @@ class Committer:
                 },
                 correlation_id,
             )
-            return False
+            return {"committed": False, "fleet_response": None}

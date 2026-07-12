@@ -187,3 +187,88 @@ class TestShedLoadProperty:
             if committed.action_type == "shed_load":
                 assert committed.parameters.get("max_inflight", 0) >= 1
                 assert committed.parameters.get("duration_seconds", 0) > 0
+
+
+class TestCooldownProperty:
+    """Cooldown always blocks same action type within window, always allows different types."""
+
+    @pytest.mark.parametrize("seed", range(50))
+    def test_cooldown_never_blocks_different_action(self, seed):
+        from gcl.loop.accountability import AccountabilityTracker
+        rng = random.Random(seed)
+        action_types = ["scale", "pre_warm", "shed_load", "alert", "migrate"]
+        tracker = AccountabilityTracker()
+
+        committed_type = rng.choice(action_types)
+        tracker.record_commit(f"c{seed}", f"corr{seed}", committed_type, 8000.0)
+
+        for other_type in action_types:
+            if other_type != committed_type:
+                allowed, _ = tracker.can_commit(other_type)
+                assert allowed, (
+                    f"Cooldown for {committed_type} should not block {other_type}"
+                )
+
+    @pytest.mark.parametrize("seed", range(50))
+    def test_cooldown_always_blocks_same_action_within_window(self, seed):
+        from gcl.loop.accountability import AccountabilityTracker
+        rng = random.Random(seed)
+        action_types = ["scale", "pre_warm", "shed_load", "alert", "migrate"]
+        tracker = AccountabilityTracker()
+
+        action_type = rng.choice(action_types)
+        tracker.record_commit(f"c{seed}", f"corr{seed}", action_type, 8000.0)
+
+        allowed, reason = tracker.can_commit(action_type)
+        assert not allowed, (
+            f"Cooldown should block repeat {action_type} within window"
+        )
+        assert "cooldown" in reason
+
+
+class TestOutcomeEffectivenessProperty:
+    """Outcome effectiveness is correctly determined by metric direction."""
+
+    @pytest.mark.parametrize("seed", range(50))
+    def test_scale_effective_iff_latency_decreases(self, seed):
+        from gcl.loop.accountability import AccountabilityTracker
+        from gcl.domain.contracts import Evidence as Ev
+        rng = random.Random(seed)
+        tracker = AccountabilityTracker()
+        tracker._outcome_min_age_seconds = 0
+
+        before_latency = rng.uniform(5000, 15000)
+        tracker.record_commit(f"c{seed}", f"corr{seed}", "scale", before_latency)
+
+        after_latency = rng.uniform(1000, 20000)
+        evidence = [Ev(metric="latency_ms", value=after_latency)]
+        outcomes = tracker.check_outcomes(evidence)
+
+        assert len(outcomes) == 1
+        expected_effective = after_latency < before_latency
+        assert outcomes[0].effective == expected_effective, (
+            f"before={before_latency}, after={after_latency}: "
+            f"expected effective={expected_effective}, got {outcomes[0].effective}"
+        )
+
+
+class TestPendingOutcomesCapProperty:
+    """Pending outcomes never exceed the configured cap regardless of commit volume."""
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_pending_never_exceeds_cap(self, seed):
+        from unittest.mock import patch as mpatch
+        from gcl.loop.accountability import AccountabilityTracker
+        rng = random.Random(seed)
+        cap = rng.randint(1, 5)
+        tracker = AccountabilityTracker()
+
+        with mpatch("gcl.loop.accountability.get_settings") as mock:
+            mock.return_value.decision_cooldown_seconds = 0
+            mock.return_value.max_pending_outcomes = cap
+            for i in range(rng.randint(10, 30)):
+                tracker.record_commit(f"c{i}", f"corr{i}", "scale", 8000.0)
+
+        assert tracker.pending_count() <= cap, (
+            f"Pending count {tracker.pending_count()} exceeds cap {cap}"
+        )
