@@ -62,3 +62,13 @@ rules:
     constraint_type: capacity
     hard: false
     confidence: 0.7
+
+# Uncomment to enable maintenance window (blocks all actions 2-4am):
+# - name: maintenance_window
+#   metric: "_time"
+#   operator: time_between
+#   start_hour: 2
+#   end_hour: 4
+#   constraint_type: custom
+#   hard: true
+#   confidence: 1.0

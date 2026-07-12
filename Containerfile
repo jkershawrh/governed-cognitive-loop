@@ -26,4 +26,4 @@ USER 1001
 
 EXPOSE 8000
 
-CMD ["uvicorn", "gcl.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "gcl.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

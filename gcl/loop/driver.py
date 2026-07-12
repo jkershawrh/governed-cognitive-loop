@@ -43,6 +43,12 @@ class LoopDriver:
         settings = get_settings()
         correlation_id = f"gcl-{uuid4()}"
 
+        await self._ledger.write_entry(
+            "gcl.cycle_start",
+            {"cycle_correlation_id": correlation_id},
+            correlation_id,
+        )
+
         # Check outcomes from previous commits
         outcomes = self._accountability.check_outcomes(signals)
         for outcome in outcomes:
@@ -172,6 +178,17 @@ class LoopDriver:
                 latency_at_commit=latency_at_commit,
                 fleet_response=fleet_response,
             )
+
+            if committed_step.action_type in ("scale", "pre_warm"):
+                actuation = await self._accountability.verify_actuation(
+                    settings.fleet_url, settings.fleet_token,
+                    committed_step.action_type, committed_step.parameters,
+                )
+                await self._ledger.write_entry(
+                    "gcl.actuation_verified",
+                    actuation,
+                    correlation_id,
+                )
 
         return LoopCycle(
             constraints_snapshot=constraints,

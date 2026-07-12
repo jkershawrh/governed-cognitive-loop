@@ -173,3 +173,15 @@ class TestLoopDriver:
         entries = await ledger.query_chain(cycle.correlation_id)
         entry_types = [e["entry_type"] for e in entries]
         assert "gcl.reject" in entry_types
+
+    @pytest.mark.asyncio
+    async def test_cycle_start_written_first(self, driver, ledger):
+        signals = [Evidence(metric="latency_ms", value=3000.0) for _ in range(5)]
+        signals += [Evidence(metric="replicas", value=3.0), Evidence(metric="max_replicas", value=10.0)]
+        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
+             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
+             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+            cycle = await driver.run_cycle(signals)
+
+        entries = await ledger.query_chain(cycle.correlation_id)
+        assert entries[0]["entry_type"] == "gcl.cycle_start"

@@ -12,6 +12,15 @@ class HorizonPredictor:
         if not signals:
             return self._flat_trajectory(0.0, horizon_steps, confidence=0.0)
 
+        # Check for classification forecast data
+        forecast_signals = [s for s in signals if s.source == "classification_metrics"
+                            and s.metric == "latency_ms"
+                            and s.labels.get("forecast") == "true"]
+        if forecast_signals:
+            forecast_value = forecast_signals[0].value
+            conf = 0.85  # classification-backed predictions are high confidence
+            return self._forecast_trajectory(forecast_value, horizon_steps, conf)
+
         metric_signals = self._select_primary_metric(signals)
         values = [s.value for s in metric_signals]
 
@@ -120,6 +129,17 @@ class HorizonPredictor:
             horizon_steps=horizon_steps,
             confidence=confidence,
         )
+
+    def _forecast_trajectory(
+        self, forecast_value: float, horizon_steps: int, confidence: float
+    ) -> Trajectory:
+        """Build a trajectory from a classification forecast value."""
+        points = []
+        for i in range(horizon_steps):
+            val = forecast_value * (1.0 + i * 0.01)  # slight upward trend from forecast
+            margin = val * 0.05
+            points.append(TrajectoryPoint(step=i, value=val, lower=val - margin, upper=val + margin))
+        return Trajectory(points=points, horizon_steps=horizon_steps, confidence=confidence)
 
     def _flat_trajectory(
         self, value: float, horizon_steps: int, confidence: float

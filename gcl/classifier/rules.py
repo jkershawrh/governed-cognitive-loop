@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime
 import operator
 from typing import Optional
+from uuid import uuid4
 
 from gcl.config import get_constraint_rules
 from gcl.domain.contracts import Constraint, Evidence
@@ -32,6 +34,24 @@ class RuleEngine:
         for rule in self._rules:
             metric = rule["metric"]
             op_name = rule["operator"]
+
+            # Time-based rules
+            if op_name == "time_between":
+                current_hour = datetime.datetime.now().hour
+                start = rule.get("start_hour", 0)
+                end = rule.get("end_hour", 0)
+                in_window = (start <= current_hour < end) if start < end else (current_hour >= start or current_hour < end)
+                if in_window:
+                    constraints.append(Constraint(
+                        type=ConstraintType(rule.get("constraint_type", "custom")),
+                        bound=float(rule.get("threshold", 0)),
+                        hard=rule.get("hard", True),
+                        justification_evidence_ids=[uuid4()],
+                        confidence=rule.get("confidence", 1.0),
+                        source=ConstraintSource.DETERMINISTIC,
+                    ))
+                continue
+
             threshold = rule.get("threshold")
             ctype_str = rule["constraint_type"]
             hard = rule.get("hard", True)

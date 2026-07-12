@@ -19,6 +19,11 @@ def compute_action_for_step(
 
     Returns action parameters dict, or None if infeasible.
     """
+    # Custom constraints (e.g. maintenance window) block all actions
+    custom_bounds = [c for c in hard_constraints if c.type == ConstraintType.CUSTOM]
+    if custom_bounds:
+        return {"action_type": "no_action", "parameters": {"reason": "custom constraint active (e.g. maintenance window)"}}
+
     action_type = "no_action"
     parameters: dict = {}
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -162,3 +163,40 @@ class TestConstraintClassifier:
             constraints = await classifier.classify(evidence)
 
         assert len(constraints) == 0
+
+
+class TestTimeBetweenRules:
+    def test_time_between_fires_during_window(self):
+        rules = [{
+            "name": "test_window",
+            "metric": "_time",
+            "operator": "time_between",
+            "start_hour": 0,
+            "end_hour": 24,  # always active
+            "constraint_type": "custom",
+            "hard": True,
+            "confidence": 1.0,
+        }]
+        engine = RuleEngine(rules=rules)
+        constraints, _ = engine.evaluate([])
+        assert len(constraints) >= 1
+        assert constraints[0].type.value == "custom"
+
+    def test_time_between_silent_outside_window(self):
+        current_hour = datetime.datetime.now().hour
+        # Set window to an hour that is NOT the current hour
+        window_hour = (current_hour + 12) % 24
+        rules = [{
+            "name": "test_window",
+            "metric": "_time",
+            "operator": "time_between",
+            "start_hour": window_hour,
+            "end_hour": (window_hour + 1) % 24,
+            "constraint_type": "custom",
+            "hard": True,
+            "confidence": 1.0,
+        }]
+        engine = RuleEngine(rules=rules)
+        constraints, _ = engine.evaluate([])
+        custom = [c for c in constraints if c.type.value == "custom"]
+        assert len(custom) == 0

@@ -102,3 +102,16 @@ class TestFleetResponse:
     def test_alert_has_no_pending(self, tracker):
         tracker.record_commit("c1", "corr1", "alert", 3000.0)
         assert tracker.pending_count() == 0
+
+
+class TestActuationVerification:
+    @pytest.mark.asyncio
+    async def test_actuation_skipped_for_non_scale(self, tracker):
+        result = await tracker.verify_actuation("", "", "alert", {})
+        assert result["skipped"] is True
+
+    @pytest.mark.asyncio
+    async def test_actuation_skipped_without_fleet_url(self, tracker):
+        result = await tracker.verify_actuation("", "", "scale", {"replicas": 5})
+        assert result["skipped"] is True
+        assert "no fleet URL" in result["reason"]

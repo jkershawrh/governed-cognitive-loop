@@ -114,3 +114,22 @@ class TestHorizonPredictor:
         assert trajectory.confidence < 0.3
         for p in trajectory.points:
             assert p.value == 4000.0
+
+    def test_predictor_uses_forecast_value_when_available(self, predictor):
+        signals = [
+            Evidence(metric="latency_ms", value=6200.0, source="classification_metrics",
+                     labels={"forecast": "true", "contributing_to": "slo_breach_predicted"}),
+            Evidence(metric="latency_ms", value=5000.0, source="prometheus"),
+            Evidence(metric="latency_ms", value=5100.0, source="prometheus"),
+            Evidence(metric="latency_ms", value=5200.0, source="prometheus"),
+        ]
+        trajectory = predictor.predict(signals, horizon_steps=5)
+        # Should use the 6200 forecast, not regress on 5000-5200
+        assert trajectory.points[0].value > 6000
+
+    def test_predictor_falls_back_to_regression_without_forecast(self, predictor):
+        signals = [Evidence(metric="latency_ms", value=3000.0 + i * 100) for i in range(10)]
+        trajectory = predictor.predict(signals, horizon_steps=5)
+        # Should use regression (no forecast signal)
+        assert trajectory.points[0].value > 3000
+        assert trajectory.points[0].value < 6000

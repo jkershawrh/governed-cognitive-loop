@@ -144,3 +144,43 @@ class AccountabilityTracker:
 
     def pending_count(self) -> int:
         return len(self._pending_outcomes)
+
+    async def verify_actuation(self, fleet_url: str, fleet_token: str,
+                                action_type: str, intended_params: dict) -> dict:
+        """Check if the physical infrastructure matches the intent."""
+        if action_type not in ("scale", "pre_warm"):
+            return {"skipped": True, "reason": "non-scaling action"}
+
+        if not fleet_url:
+            return {"skipped": True, "reason": "no fleet URL configured"}
+
+        intended_replicas = intended_params.get("replicas", intended_params.get("target_replicas"))
+        if intended_replicas is None:
+            return {"skipped": True, "reason": "no replica count in intent"}
+
+        try:
+            import httpx
+            from gcl.adapter.fleet_adapter import _generate_fleet_token
+            headers = {}
+            if fleet_token:
+                headers["Authorization"] = f"Bearer {_generate_fleet_token(fleet_token)}"
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(f"{fleet_url}/api/v1/modelplane/deployments", headers=headers)
+                if r.status_code != 200:
+                    return {"skipped": True, "reason": f"fleet returned {r.status_code}"}
+
+                deployments = r.json()
+                # Sum replicas across all deployments (simplified)
+                actual_replicas = 0
+                if isinstance(deployments, list):
+                    for d in deployments:
+                        actual_replicas += d.get("replicas", d.get("spec", {}).get("replicas", 0))
+
+                return {
+                    "verified": actual_replicas >= intended_replicas,
+                    "intended_replicas": intended_replicas,
+                    "actual_replicas": actual_replicas,
+                }
+        except Exception as e:
+            return {"skipped": True, "reason": str(e)}
