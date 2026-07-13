@@ -74,7 +74,7 @@
 
 **Humor beat:** It lets the imaginative part brainstorm the goal but keeps it nowhere near the launch button, which is more discipline than most org charts manage.
 
-**Turn:** A human's intuition and execution live in the same fallible head, and this system claims no optimality either. It separates creative framing from deterministic candidate checks and emits a reviewable signed proposal. ARE and fleet remain responsible for authorization, receipts, and observed execution.
+**Turn:** A human's intuition and execution live in the same fallible head, and this system claims no optimality either. It separates creative framing from deterministic candidate checks and emits a reviewable signed proposal. fleet-llm-d remains responsible for authorization and observed execution; are-immutable-ledger records evidence receipts but grants no authority.
 
 ---
 

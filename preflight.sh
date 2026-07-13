@@ -29,7 +29,9 @@ if [ "${GCL_LEDGER_SKIP:-}" != "1" ]; then
   check "ledger reachable" "python3 -c '
 import httpx, os
 url = os.getenv(\"GCL_LEDGER_URL\", \"http://localhost:18099\")
-r = httpx.get(f\"{url}/api/summary\", timeout=5)
+token = os.getenv(\"GCL_LEDGER_BEARER_TOKEN\", \"\")
+headers = {\"Authorization\": f\"Bearer {token}\"} if token else {}
+r = httpx.get(f\"{url}/api/summary\", headers=headers, timeout=5)
 assert r.status_code == 200
 '"
 else

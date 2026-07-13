@@ -145,3 +145,4 @@ Runs, in order: preflight, a run of the demo driver executing each layer indepen
 ## Definition of Done
 
 verify.sh exits 0. One canonical spine, every format descends through it. Every beat is produced by the real loop and the horizon is drawn from real cycle data and redraws live. The LLM-boundary is shown, not blurred. No optimality or infallibility is claimed anywhere. Every layer lands its turn and is complete on its own, and Layer 0 stands alone as the extractable partner beat. The room walks out repeating the belief sentence. No em-dashes anywhere.
+> **Archived build input:** This prompt predates the current ecosystem ownership boundary. The authoritative runtime is `deepfield-fleet -> GCL -> fleet-llm-d`, with `are-immutable-ledger` used only for evidence/proof. GCL never authorizes or actuates. See `docs/READFIRST.md` before using historical story material.

@@ -6,19 +6,19 @@
 **Date:** July 2026
 **Version:** Draft 0.1
 
-> **Architecture update:** This draft originally described direct fleet v1 HMAC submission and inferred execution from HTTP acknowledgement. That path is obsolete. The current target contract is the signed `DecisionPackage` proposal described in [DecisionPackage v1](../decision-package-v1.md). GCL does not authorize or execute infrastructure, and repository tests are not live ecosystem evidence.
+> **Architecture update:** This draft originally described direct fleet v1 HMAC submission and a separate governance/authorization chain. Those paths are obsolete for this ecosystem. The current runtime is `deepfield-fleet -> GCL -> fleet-llm-d`, with `are-immutable-ledger` used only for evidence receipts and proof verification. GCL does not authorize or execute infrastructure, a ledger receipt is never a credential, and repository tests are not live ecosystem evidence.
 
 ---
 
 ## 1. Executive Summary
 
-The Governed Cognitive Loop (GCL) is the decision-synthesis layer for AI inference fleet management. It consumes observations and forecasts, uses an LLM to interpret the goal, uses deterministic mathematics to compute candidates, and subjects the selected candidate to falsification checks. A surviving consequential candidate becomes a signed, expiry-bounded `DecisionPackage` proposal. Agent-promotion, governance-strata, ARE, and fleet remain responsible for proposer authority, transaction lifecycle, execution grants, immutable receipts, and observed actuation. The component guarantee is bounded constraint checking and falsification-gated proposal, not optimality or execution.
+The Governed Cognitive Loop (GCL) is the decision-synthesis layer for AI inference fleet management. It consumes deepfield-fleet observations and forecasts, uses an LLM to interpret the goal, uses deterministic mathematics to compute candidates, and subjects the selected candidate to falsification checks. A surviving consequential candidate becomes a signed, expiry-bounded advisory `DecisionPackage`. GCL submits it directly to fleet-llm-d, which owns admission, authorization, operation lifecycle, and observed actuation. are-immutable-ledger records evidence and verifies proofs only. The component guarantee is bounded constraint checking and falsification-gated proposal, not optimality or execution.
 
 ## 2. Problem Statement
 
 ### 2.1 The Prediction-Actuation Gap
 
-The inference fleet has observation producers and an actuation layer. `rev_deepfield` owns canonical findings and forecasts. fleet-llm-d owns authorized fleet reconciliation. Between them, GCL asks what action should be proposed and records the alternatives and falsification evidence without bypassing governance or ARE.
+The inference fleet has an observation producer and an actuation layer. `deepfield-fleet` owns findings and forecasts. fleet-llm-d owns authorized fleet reconciliation. Between them, GCL asks what action should be proposed and records the alternatives and falsification evidence without bypassing fleet admission.
 
 ### 2.2 The Two Unsafe Alternatives
 
@@ -30,7 +30,7 @@ Without a governing layer, organizations face two options, both inadequate.
 
 ### 2.3 What Governed Autonomy Means
 
-The GCL fills this gap with a specific architecture: the LLM interprets the goal, deterministic math computes candidates, and every selected candidate is challenged before a package can be proposed. Audit truth is complete only when ARE verifies the external receipt chain.
+The GCL fills this gap with a specific architecture: the LLM interprets the goal, deterministic math computes candidates, and every selected candidate is challenged before a package can be proposed. External proof exists only when are-immutable-ledger verifies the receipt chain, and that proof does not authorize execution.
 
 ## 3. Architecture
 
@@ -42,9 +42,9 @@ The GCL operates within a four-system platform. Each system owns a distinct resp
 
 **Governed Cognitive Loop (GCL)** owns the decision. It receives evidence (either directly as metric signals or via classification adapter from deepfield-fleet), classifies constraints, predicts the trajectory, interprets the objective, computes the action plan, falsifies the committed step, and either commits or rejects. The GCL decides; it does not execute.
 
-**fleet-llm-d** owns authorized fleet desired, observed, and operation state. It does not receive ordinary direct execution requests from GCL. The governed chain creates a `FleetIntent` and `FleetOperation` only after proposer, transaction, and ARE authorization stages.
+**fleet-llm-d** owns intent admission, execution authorization, fleet desired state, observed state, operation state, and infrastructure actuation. GCL submits an advisory DecisionPackage CloudEvent to `/api/v2/intents`; fleet creates and governs the resulting `FleetIntent` and `FleetOperation`.
 
-**ARE** owns final execution authorization and immutable receipt truth. GCL writes correlated decision records through its configured client, but local or in-memory records are not equivalent to verified ARE receipts.
+**are-immutable-ledger** owns immutable evidence receipts and proof verification. GCL writes correlated decision records through its configured client, but local or in-memory records are not equivalent to verified external receipts. Ledger receipts prove that evidence was recorded; they are not credentials and never grant fleet authority.
 
 ### 3.2 The Seven GCL Components
 
@@ -60,7 +60,7 @@ The GCL is composed of seven components, each with a single responsibility. They
 
 **5. FalsificationGate** (`gcl/falsification/gate.py`). Treats the committed step as a hypothesis: "this action produces the intended outcome under the predicted conditions." It runs seven deterministic disconfirmation checks in sequence, short-circuiting on the first failure. If all seven pass and force-deterministic mode is not active, an optional LLM adversary (`gcl/falsification/llm_adversary.py`) probes the action for incorrect assumptions, missing preconditions, timing issues, or cascading failures. The result is a FalsificationResult with verdict SURVIVES or FAILS, the failed check name (if any), reasoning, and evidence IDs.
 
-**6. Committer** (`gcl/committer/committer.py`). If the falsification verdict is SURVIVES, the Committer accepts a signed `DecisionPackage`, calls only a proposer adapter, and writes `gcl.decision_package.proposed` with `execution_verified=false`. If the verdict is FAILS or package construction is invalid, it writes a rejection record. It has no ordinary fleet actuation call.
+**6. Committer** (`gcl/committer/committer.py`). If the falsification verdict is SURVIVES, the Committer accepts a signed `DecisionPackage`, calls only fleet-llm-d's intent-admission adapter, and writes `gcl.decision_package.proposed` with `execution_verified=false`. If the verdict is FAILS or package construction is invalid, it writes a rejection record. It has no fleet actuation call.
 
 **7. LoopDriver** (`gcl/loop/driver.py`). Orchestrates a single cycle. It receives a list of Evidence signals, calls each component in sequence (classify, predict, interpret, optimize, falsify, commit), writes ledger entries at each stage under a single correlation ID (`gcl-{uuid}`), and returns a LoopCycle record containing the full state: constraints snapshot, trajectory, objective, action plan (or None if infeasible), falsification result, committed boolean, and correlation ID.
 
@@ -70,7 +70,7 @@ The classification adapter (`gcl/adapter/classification_adapter.py`) transforms 
 
 ### 3.4 The Fleet Adapter
 
-The proposer adapter (`gcl/adapter/proposer_adapter.py`) publishes the signed package as a structured CloudEvents 1.0 event. Correlation, causation, idempotency, tenant, zone, expiry, trace, and evidence extensions travel with the package. The old fleet adapter remains disabled production compatibility code only. It requires an explicit development flag and never reports verified execution.
+The FleetIntentAdapter (`gcl/adapter/proposer_adapter.py`, with `ProposerAdapter` retained as an import alias) publishes the signed package as a structured CloudEvents 1.0 event directly to fleet-llm-d's `/api/v2/intents` boundary. Correlation, causation, idempotency, tenant, zone, expiry, trace, and evidence extensions travel with the package. The old fleet v1 adapter remains disabled production compatibility code only. It requires an explicit development flag and never reports verified execution.
 
 ## 4. The Honesty Boundary
 
@@ -148,7 +148,7 @@ The GCL can pull live platform metrics from fleet-llm-d's centralized metrics AP
 
 After a decision package is proposed, GCL can accept verified external outcomes for accountability. Proposal acknowledgement alone does not create an outcome or prove execution.
 
-**Outcome ledger (gcl.outcome).** Every committed action produces a gcl.outcome entry in the ARE Immutable Ledger. The entry records whether the action achieved its intended effect, failed, or produced an unexpected result. This closes the gap between "the GCL decided to scale" and "the scale actually happened and helped."
+**Outcome ledger (gcl.outcome).** Verified external outcomes can produce a gcl.outcome receipt in are-immutable-ledger. The entry records whether an admitted proposal's resulting operation achieved its intended effect, failed, or produced an unexpected result. The receipt is accountability evidence, not execution authority.
 
 **Decision cooldown (60s default).** After committing an action, the GCL enforces a 60-second cooldown before the same action type can be committed again. This prevents oscillation where consecutive cycles alternate between scale-up and scale-down (or shed-load and no-action) because each cycle sees only the state before the previous action takes effect. The cooldown duration is configurable via `GCL_DECISION_COOLDOWN_SECONDS`.
 
@@ -160,9 +160,9 @@ After a decision package is proposed, GCL can accept verified external outcomes 
 
 **Time-aware constraints (maintenance windows).** The constraint classifier recognizes time-based evidence (maintenance windows, restricted scaling periods, time-of-day policies). When a maintenance window is active, the classifier produces a hard time constraint that prevents actuation. This ensures the GCL does not scale or migrate during scheduled downtime, even if SLO metrics indicate a breach.
 
-### 6.6 Authority Gate
+### 6.6 Optional agent-promotion compatibility
 
-The GCL is wired to the agent-promotion-line's AuthorityGate. Before committing any action, the GCL checks whether its consequence score is within its earned authority ceiling. The promotion line reads gcl.outcome entries from the ARE ledger to compute the GCL's track record: commits with effective=true are successes, effective=false are failures. The GCL's authority tier (T0 PROBATION through T4 PRINCIPAL) rises and falls based on this record. Demotion is always immediate. Promotion into high-consequence tiers can require human ratification.
+Agent-promotion is not in the core runtime and cannot gate GCL submission or fleet execution. If `GCL_AGENT_PROMOTION_URL` is configured, GCL may collect proposer-ceiling provenance and attach it to the DecisionPackage with `non_authoritative=true`. Allow, refuse, route-human, and unavailable results are metadata only. fleet-llm-d remains the sole owner of admission and execution authorization.
 
 ### 6.7 Validated Scenarios
 
@@ -252,11 +252,11 @@ An additional 100 property seeds test that committed_step_index is always 0 (`te
 
 ### 8.1 Deployment Environment
 
-Deployed on OpenShift (Oberon cluster). Single-node, Red Hat Enterprise Linux CoreOS 9.8, Kubernetes 1.35. The GCL runs as a containerized Python application alongside fleet-llm-d (Go control plane) and the ARE Immutable Ledger.
+Historical environment observation: GCL ran on an OpenShift Oberon cluster alongside fleet-llm-d and are-immutable-ledger. This predates the current DecisionPackage `/api/v2/intents` boundary and is not current release evidence.
 
 ### 8.2 Ledger Evidence
 
-1,400 GCL entries in the ARE Immutable Ledger. 193 correlation chains, each representing a complete cycle from classify through commit/reject. All 32 chain types cryptographically valid (SHA-256 hash chains verified via `GET /api/verify`).
+The historical environment recorded 1,400 GCL entries in are-immutable-ledger across 193 correlation chains. Those observations prove only the historical ledger records and do not prove the current runtime path or execution authorization.
 
 ### 8.3 Governed Cycle Results
 
@@ -292,7 +292,7 @@ Both records exist in the immutable ledger under different correlation IDs. This
 
 ### 8.5 Fleet Integration
 
-Historical experiments used direct HMAC fleet intent submission. That evidence applies only to the retired compatibility path and does not establish the current governed DecisionPackage, ARE authorization, operation, or outcome chain.
+Historical experiments used direct HMAC fleet intent submission. That evidence applies only to the retired compatibility path and does not establish the current DecisionPackage admission, fleet authorization, operation, or outcome chain.
 
 ### 8.6 Operational Stability
 

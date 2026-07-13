@@ -42,17 +42,23 @@ spec:
           env:
             - name: GCL_LEDGER_URL
               value: "http://ledger-gateway.sovereign-ai-lab.svc:28099"
-            - name: GCL_PROPOSER_URL
-              value: "http://agent-promotion.agent-promotion.svc:8080"
-            - name: GCL_AUTHORITY_URL
-              value: "http://agent-promotion.agent-promotion.svc:8080"
-            - name: GCL_PASSPORT_URL
-              value: "https://are-gateway.are.svc:8443"
-            - name: GCL_PASSPORT_ID
+            - name: GCL_LEDGER_BEARER_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: gcl-identity
-                  key: passport-id
+                  key: ledger-token
+                  optional: true
+            - name: GCL_FLEET_INTENTS_URL
+              value: "http://fleet-controller.fleet-llm-d.svc:8080"
+            - name: GCL_FLEET_INTENTS_PATH
+              value: "/api/v2/intents"
+            - name: GCL_DEEPFIELD_EVENT_SOURCE
+              value: "urn:srex:deepfield-fleet"
+            - name: GCL_DEEPFIELD_EVENT_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-identity
+                  key: deepfield-event-token
             - name: GCL_DECISION_SIGNING_KEY
               valueFrom:
                 secretKeyRef:
@@ -63,7 +69,7 @@ spec:
                 secretKeyRef:
                   name: gcl-decision-signing
                   key: active-key-id
-            - name: GCL_PROPOSER_BEARER_TOKEN
+            - name: GCL_FLEET_BEARER_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: gcl-identity

@@ -97,7 +97,9 @@ class DecisionConstraint(ContractModel):
     def validate_evidence_refs(cls, values: list[str]) -> list[str]:
         for value in values:
             if not re.fullmatch(DIGEST_PATTERN, value):
-                raise ValueError("evidence references must be sha256:<64 lowercase hex>")
+                raise ValueError(
+                    "evidence references must be sha256:<64 lowercase hex>"
+                )
         return values
 
 
@@ -127,7 +129,9 @@ class DecisionFalsificationResult(ContractModel):
     def validate_evidence_refs(cls, values: list[str]) -> list[str]:
         for value in values:
             if not re.fullmatch(DIGEST_PATTERN, value):
-                raise ValueError("evidence references must be sha256:<64 lowercase hex>")
+                raise ValueError(
+                    "evidence references must be sha256:<64 lowercase hex>"
+                )
         return values
 
 
@@ -139,16 +143,17 @@ class ProposerIdentity(ContractModel):
     trust_domain: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 
 
-class ProposerAuthorityAttestation(ContractModel):
-    agent_id: str = Field(min_length=1, max_length=256)
+class AgentPromotionCompatibilityAttestation(ContractModel):
+    """Optional proposer-ceiling provenance, never execution authority."""
+
+    provider: Literal["agent-promotion"] = "agent-promotion"
+    non_authoritative: Literal[True] = True
+    subject: str = Field(min_length=1, max_length=256)
     action_class: CanonicalFleetActionClass
-    decision: Literal["ALLOW"]
-    passport_id: str = Field(min_length=1, max_length=256)
-    passport_status: str = Field(min_length=1, max_length=128)
+    decision: Literal["allow", "refuse", "route_human", "unavailable"]
     consequence_score: float = Field(ge=0.0, le=1.0)
     autonomy_ceiling: float = Field(ge=0.0, le=1.0)
-    passport_decision_ref: str = Field(pattern=DIGEST_PATTERN)
-    authority_decision_ref: str = Field(pattern=DIGEST_PATTERN)
+    attestation_ref: str = Field(pattern=DIGEST_PATTERN)
     issued_at: datetime
     expires_at: datetime
 
@@ -158,11 +163,9 @@ class ProposerAuthorityAttestation(ContractModel):
         return _require_aware(value, info.field_name)
 
     @model_validator(mode="after")
-    def expiry_follows_issue(self) -> "ProposerAuthorityAttestation":
+    def expiry_follows_issue(self) -> "AgentPromotionCompatibilityAttestation":
         if self.expires_at <= self.issued_at:
-            raise ValueError("authority attestation must expire after it is issued")
-        if self.consequence_score > self.autonomy_ceiling:
-            raise ValueError("authority attestation cannot exceed the autonomy ceiling")
+            raise ValueError("compatibility attestation must expire after it is issued")
         return self
 
 
@@ -177,13 +180,14 @@ class DecisionPackageV1(ContractModel):
     tenant: str = Field(min_length=1, max_length=256)
     zone: str = Field(min_length=1, max_length=256)
     proposer: ProposerIdentity
-    authority: ProposerAuthorityAttestation
+    agent_promotion: Optional[AgentPromotionCompatibilityAttestation] = None
     constraints: list[DecisionConstraint] = Field(min_length=1)
     candidates: list[DecisionCandidate] = Field(min_length=1)
     selected_candidate_id: str = Field(min_length=1, max_length=256)
     rejected_alternatives: list[RejectedAlternative]
     falsification_results: list[DecisionFalsificationResult] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
+    evidence_sources: list[str] = Field(min_length=1)
     evidence_refs: list[str] = Field(min_length=1)
 
     @field_validator("created_at", "expires_at")
@@ -196,7 +200,9 @@ class DecisionPackageV1(ContractModel):
     def validate_evidence_refs(cls, values: list[str]) -> list[str]:
         for value in values:
             if not re.fullmatch(DIGEST_PATTERN, value):
-                raise ValueError("evidence references must be sha256:<64 lowercase hex>")
+                raise ValueError(
+                    "evidence references must be sha256:<64 lowercase hex>"
+                )
         if len(values) != len(set(values)):
             raise ValueError("evidence references must be unique")
         return values
@@ -205,8 +211,13 @@ class DecisionPackageV1(ContractModel):
     def validate_references_and_expiry(self) -> "DecisionPackageV1":
         if self.expires_at <= self.created_at:
             raise ValueError("decision package must expire after it is created")
-        if self.authority.expires_at < self.expires_at:
-            raise ValueError("authority attestation cannot expire before the package")
+        if (
+            self.agent_promotion is not None
+            and self.agent_promotion.expires_at <= self.created_at
+        ):
+            raise ValueError(
+                "agent-promotion compatibility attestation is already expired"
+            )
         candidate_ids = [candidate.candidate_id for candidate in self.candidates]
         if len(candidate_ids) != len(set(candidate_ids)):
             raise ValueError("candidate ids must be unique")
@@ -215,6 +226,17 @@ class DecisionPackageV1(ContractModel):
         for result in self.falsification_results:
             if result.candidate_id not in candidate_ids:
                 raise ValueError("falsification result references an unknown candidate")
+        selected_results = [
+            result
+            for result in self.falsification_results
+            if result.candidate_id == self.selected_candidate_id
+        ]
+        if not selected_results:
+            raise ValueError("selected candidate requires a falsification result")
+        if any(result.verdict != "survives" for result in selected_results):
+            raise ValueError(
+                "selected candidate must survive every falsification check"
+            )
         rejected_ids = {
             alternative.candidate.candidate_id
             for alternative in self.rejected_alternatives
@@ -223,13 +245,9 @@ class DecisionPackageV1(ContractModel):
             raise ValueError("selected candidate cannot also be rejected")
         known_evidence = set(self.evidence_refs)
         referenced_evidence = {
-            ref
-            for constraint in self.constraints
-            for ref in constraint.evidence_refs
+            ref for constraint in self.constraints for ref in constraint.evidence_refs
         } | {
-            ref
-            for result in self.falsification_results
-            for ref in result.evidence_refs
+            ref for result in self.falsification_results for ref in result.evidence_refs
         }
         if not referenced_evidence.issubset(known_evidence):
             raise ValueError("nested evidence reference is absent from evidence_refs")
@@ -258,9 +276,13 @@ class SignedDecisionPackageV1(ContractModel):
     ) -> "SignedDecisionPackageV1":
         if len(key) < 32:
             raise ValueError("decision signing key must contain at least 32 bytes")
-        signature = base64.urlsafe_b64encode(
-            hmac.new(key, canonical_json(package), hashlib.sha256).digest()
-        ).rstrip(b"=").decode("ascii")
+        signature = (
+            base64.urlsafe_b64encode(
+                hmac.new(key, canonical_json(package), hashlib.sha256).digest()
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
         return cls(
             package=package,
             digest=sha256_ref(package),
@@ -282,9 +304,13 @@ class SignedDecisionPackageV1(ContractModel):
         current = _require_aware(at or _utc_now(), "at")
         if current < self.package.created_at or current >= self.package.expires_at:
             return False
-        expected = base64.urlsafe_b64encode(
-            hmac.new(key, canonical_json(self.package), hashlib.sha256).digest()
-        ).rstrip(b"=").decode("ascii")
+        expected = (
+            base64.urlsafe_b64encode(
+                hmac.new(key, canonical_json(self.package), hashlib.sha256).digest()
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
         return hmac.compare_digest(self.signature, expected)
 
 
@@ -353,26 +379,32 @@ def build_decision_package(
     falsification: FalsificationResult,
     evidence: list[Evidence],
     correlation_id: str,
-    passport_decision: dict[str, Any],
-    authority_decision: dict[str, Any],
     proposer: ProposerIdentity,
-    passport_id: str,
     tenant: str,
     zone: str,
     ttl_seconds: int,
     signing_key: bytes,
     signing_key_id: str,
+    agent_promotion_attestation: Optional[dict[str, Any]] = None,
+    causation_id: Optional[str] = None,
+    idempotency_id: Optional[str] = None,
 ) -> SignedDecisionPackageV1:
     """Translate one surviving cycle into the owned, signed decision contract."""
     created_at = _utc_now()
     expires_at = created_at + timedelta(seconds=ttl_seconds)
-    evidence_by_id = {
-        str(item.id): sha256_ref(item)
+    evidence_by_id = {str(item.id): sha256_ref(item) for item in evidence}
+    producer_evidence_refs = {
+        ref
         for item in evidence
+        for ref in item.metadata.get("producer_evidence_refs", [])
+        if isinstance(ref, str) and re.fullmatch(DIGEST_PATTERN, ref)
     }
-    evidence_refs = sorted(set(evidence_by_id.values()))
+    evidence_refs = sorted(set(evidence_by_id.values()) | producer_evidence_refs)
+    evidence_sources = sorted({item.source for item in evidence if item.source.strip()})
     if not evidence_refs:
         raise ValueError("a decision package requires at least one evidence reference")
+    if not evidence_sources:
+        raise ValueError("a decision package requires at least one evidence source")
 
     constraint_contracts = []
     for constraint in constraints:
@@ -397,7 +429,7 @@ def build_decision_package(
         if step.action_type not in ACTION_CLASS_NAMES:
             if index == action_plan.committed_step_index:
                 raise ValueError(
-                    "selected action does not map to a canonical ARE fleet action class"
+                    "selected action does not map to a canonical fleet action class"
                 )
             continue
         candidate_payload = {
@@ -435,32 +467,38 @@ def build_decision_package(
     )
 
     action_class = selected.action_class
-    consequence = float(authority_decision.get("consequence_score", 0.0))
-    ceiling = float(authority_decision.get("ceiling", 1.0))
-    passport_status = str(passport_decision.get("passport_status", "ACTIVE"))
-    authority_attestation = ProposerAuthorityAttestation(
-        agent_id=proposer.agent_id,
-        action_class=action_class,
-        decision="ALLOW",
-        passport_id=passport_id,
-        passport_status=passport_status,
-        consequence_score=consequence,
-        autonomy_ceiling=ceiling,
-        passport_decision_ref=sha256_ref(passport_decision),
-        authority_decision_ref=sha256_ref(authority_decision),
-        issued_at=created_at,
-        expires_at=expires_at,
-    )
+    compatibility_attestation = None
+    if agent_promotion_attestation is not None:
+        raw_decision = str(
+            agent_promotion_attestation.get(
+                "verdict",
+                agent_promotion_attestation.get("decision", "unavailable"),
+            )
+        ).lower()
+        if raw_decision not in {"allow", "refuse", "route_human", "unavailable"}:
+            raw_decision = "unavailable"
+        compatibility_attestation = AgentPromotionCompatibilityAttestation(
+            subject=proposer.agent_id,
+            action_class=action_class,
+            decision=raw_decision,
+            consequence_score=float(
+                agent_promotion_attestation.get("consequence_score", 0.0)
+            ),
+            autonomy_ceiling=float(agent_promotion_attestation.get("ceiling", 0.0)),
+            attestation_ref=sha256_ref(agent_promotion_attestation),
+            issued_at=created_at,
+            expires_at=expires_at,
+        )
     package = DecisionPackageV1(
         created_at=created_at,
         expires_at=expires_at,
         correlation_id=correlation_id,
-        causation_id=correlation_id,
-        idempotency_id=f"decision:{correlation_id}",
+        causation_id=causation_id or correlation_id,
+        idempotency_id=idempotency_id or f"decision:{correlation_id}",
         tenant=tenant,
         zone=zone,
         proposer=proposer,
-        authority=authority_attestation,
+        agent_promotion=compatibility_attestation,
         constraints=constraint_contracts,
         candidates=candidates,
         selected_candidate_id=selected.candidate_id,
@@ -470,6 +508,7 @@ def build_decision_package(
             [trajectory.confidence]
             + [constraint.confidence for constraint in constraints]
         ),
+        evidence_sources=evidence_sources,
         evidence_refs=evidence_refs,
     )
     return SignedDecisionPackageV1.sign(package, signing_key, signing_key_id)

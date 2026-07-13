@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
-from gcl.domain.contracts import Evidence
+from gcl.domain.contracts import Evidence, FalsificationResult
 from gcl.domain.enums import Verdict
 from gcl.loop.driver import LoopDriver
 from gcl.loop.ledger import LedgerClient
@@ -36,11 +37,65 @@ def driver(ledger):
 
 class TestLoopDriver:
     @pytest.mark.asyncio
+    async def test_explicit_scope_is_bound_to_signed_decision_package(self, ledger):
+        adapter = MagicMock()
+        adapter.propose = AsyncMock(
+            return_value={"status": "accepted", "execution_verified": False}
+        )
+        gate = MagicMock()
+        gate.falsify = AsyncMock(
+            return_value=FalsificationResult(
+                action_id=uuid4(),
+                verdict=Verdict.SURVIVES,
+                reasoning="focused scope-binding fixture survives",
+            )
+        )
+        driver = LoopDriver(ledger=ledger, adapter=adapter, gate=gate)
+
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
+            await driver.run_cycle(
+                _breach_signals(),
+                tenant="tenant-from-producer",
+                zone="eu-sovereign",
+            )
+
+        signed = adapter.propose.await_args.args[0]
+        assert signed.package.tenant == "tenant-from-producer"
+        assert signed.package.zone == "eu-sovereign"
+
+    @pytest.mark.asyncio
+    async def test_core_loop_does_not_require_agent_promotion(self, ledger):
+        adapter = MagicMock()
+        adapter.propose = AsyncMock(
+            return_value={"status": "accepted", "execution_verified": False}
+        )
+        driver = LoopDriver(ledger=ledger, adapter=adapter)
+
+        with (
+            patch(
+                "gcl.loop.authority.collect_agent_promotion_attestation",
+                new=AsyncMock(),
+            ) as promotion,
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
+            await driver.run_cycle(_breach_signals())
+
+        promotion.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_full_cycle_produces_complete_loop_cycle(self, driver, ledger):
         signals = _breach_signals()
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         assert cycle.correlation_id is not None
@@ -51,9 +106,11 @@ class TestLoopDriver:
     @pytest.mark.asyncio
     async def test_breach_produces_committed_action(self, driver, ledger):
         signals = _breach_signals()
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         if cycle.action_plan is not None and cycle.falsification is not None:
@@ -72,9 +129,11 @@ class TestLoopDriver:
             Evidence(metric="max_replicas", value=2.0),
         ]
 
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         if not cycle.committed:
@@ -88,9 +147,11 @@ class TestLoopDriver:
         ]
 
         driver = LoopDriver(ledger=ledger)
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         entries = await ledger.query_chain(cycle.correlation_id)
@@ -108,9 +169,11 @@ class TestLoopDriver:
     @pytest.mark.asyncio
     async def test_ledger_chain_has_all_stages(self, driver, ledger):
         signals = _breach_signals()
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         entries = await ledger.query_chain(cycle.correlation_id)
@@ -124,9 +187,11 @@ class TestLoopDriver:
     @pytest.mark.asyncio
     async def test_correlation_id_consistent(self, driver, ledger):
         signals = _breach_signals()
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         entries = await ledger.query_chain(cycle.correlation_id)
@@ -136,9 +201,11 @@ class TestLoopDriver:
     @pytest.mark.asyncio
     async def test_receding_horizon_re_plans(self, driver, ledger):
         signals = _breach_signals()
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle1 = await driver.run_cycle(signals)
             cycle2 = await driver.run_cycle(signals)
 
@@ -159,15 +226,15 @@ class TestLoopDriver:
         from gcl.controller.controller import Controller
         from unittest.mock import patch as mpatch
 
-        original_optimize = Controller.optimize
-
         def infeasible_optimize(self, trajectory, objective, constraints):
             return None
 
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True), \
-             mpatch.object(Controller, "optimize", infeasible_optimize):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+            mpatch.object(Controller, "optimize", infeasible_optimize),
+        ):
             cycle = await driver.run_cycle(signals)
 
         assert cycle.committed is False
@@ -181,10 +248,15 @@ class TestLoopDriver:
     @pytest.mark.asyncio
     async def test_cycle_start_written_first(self, driver, ledger):
         signals = [Evidence(metric="latency_ms", value=3000.0) for _ in range(5)]
-        signals += [Evidence(metric="replicas", value=3.0), Evidence(metric="max_replicas", value=10.0)]
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        signals += [
+            Evidence(metric="replicas", value=3.0),
+            Evidence(metric="max_replicas", value=10.0),
+        ]
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             cycle = await driver.run_cycle(signals)
 
         entries = await ledger.query_chain(cycle.correlation_id)

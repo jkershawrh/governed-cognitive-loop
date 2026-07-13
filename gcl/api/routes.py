@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import hmac
 import json
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from gcl.adapter.classification_adapter import batch_classifications_to_evidence
+from gcl.adapter.deepfield_event_adapter import (
+    DeepFieldCloudEventV1,
+    deepfield_event_to_evidence,
+)
 from gcl.api.schemas import ChainEntry, CycleRequest, CycleResponse
+from gcl.config import get_settings
 from gcl.domain.contracts import Evidence, LoopCycle
 from gcl.domain.decision_package import (
     decision_package_cloud_event_schema,
@@ -42,8 +49,20 @@ def get_ledger() -> LedgerClient:
     return _ledger
 
 
+def _require_non_production_compatibility(endpoint: str) -> None:
+    if get_settings().runtime_mode == "production":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{endpoint} is a development compatibility endpoint; "
+                "production ingestion requires a DeepField CloudEvent"
+            ),
+        )
+
+
 @router.post("/cycle", response_model=CycleResponse)
 async def run_cycle(request: CycleRequest) -> CycleResponse:
+    _require_non_production_compatibility("/api/v1/cycle")
     signals = [
         Evidence(metric=s.metric, value=s.value, source=s.source)
         for s in request.signals
@@ -96,12 +115,14 @@ async def get_chain(cycle_id: str) -> list[ChainEntry]:
                 content = json.loads(content)
             except (json.JSONDecodeError, ValueError):
                 content = {"raw": content}
-        result.append(ChainEntry(
-            entry_id=e.get("entry_id", ""),
-            entry_type=e.get("entry_type", ""),
-            correlation_id=e.get("correlation_id", ""),
-            content=content,
-        ))
+        result.append(
+            ChainEntry(
+                entry_id=e.get("entry_id", ""),
+                entry_type=e.get("entry_type", ""),
+                correlation_id=e.get("correlation_id", ""),
+                content=content,
+            )
+        )
     return result
 
 
@@ -116,16 +137,18 @@ async def list_cycles() -> list[CycleResponse]:
         verdict = None
         if cycle.falsification is not None:
             verdict = cycle.falsification.verdict.value
-        results.append(CycleResponse(
-            cycle_id=str(cycle.cycle_id),
-            correlation_id=cycle.correlation_id,
-            committed=cycle.committed,
-            execution_verified=cycle.execution_verified,
-            proposal_status=_proposal_status(cycle),
-            decision_package_digest=cycle.decision_package_digest,
-            action_type=action_type,
-            falsification_verdict=verdict,
-        ))
+        results.append(
+            CycleResponse(
+                cycle_id=str(cycle.cycle_id),
+                correlation_id=cycle.correlation_id,
+                committed=cycle.committed,
+                execution_verified=cycle.execution_verified,
+                proposal_status=_proposal_status(cycle),
+                decision_package_digest=cycle.decision_package_digest,
+                action_type=action_type,
+                falsification_verdict=verdict,
+            )
+        )
     return results
 
 
@@ -163,7 +186,10 @@ async def seed_scenario_endpoint(request: ScenarioSeedRequest) -> dict:
 async def get_scenario_step(step_index: int) -> dict:
     engine = get_active_scenario()
     if engine is None:
-        raise HTTPException(status_code=400, detail="No scenario seeded. POST /api/v1/scenario/seed first.")
+        raise HTTPException(
+            status_code=400,
+            detail="No scenario seeded. POST /api/v1/scenario/seed first.",
+        )
     try:
         signals = engine.get_step(step_index)
     except IndexError as e:
@@ -171,8 +197,7 @@ async def get_scenario_step(step_index: int) -> dict:
     return {
         "step_index": step_index,
         "signals": [
-            {"metric": s.metric, "value": s.value, "source": s.source}
-            for s in signals
+            {"metric": s.metric, "value": s.value, "source": s.source} for s in signals
         ],
     }
 
@@ -184,7 +209,11 @@ async def modelplane_status() -> dict:
 
     fleet_url = os.environ.get("GCL_FLEET_URL", "")
     if not fleet_url:
-        return {"clusters": [], "deployments": [], "error": "GCL_FLEET_URL not configured"}
+        return {
+            "clusters": [],
+            "deployments": [],
+            "error": "GCL_FLEET_URL not configured",
+        }
 
     import httpx
 
@@ -203,18 +232,24 @@ async def modelplane_status() -> dict:
                 "deployments": [],
                 "error": "legacy fleet HMAC compatibility is disabled",
             }
-        headers["Authorization"] = f"Bearer {_generate_fleet_token(settings.fleet_token)}"
+        headers["Authorization"] = (
+            f"Bearer {_generate_fleet_token(settings.fleet_token)}"
+        )
 
     result: dict = {"clusters": [], "deployments": []}
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            r = await client.get(f"{fleet_url}/api/v1/modelplane/clusters", headers=headers)
+            r = await client.get(
+                f"{fleet_url}/api/v1/modelplane/clusters", headers=headers
+            )
             if r.status_code == 200:
                 result["clusters"] = r.json()
         except Exception:
             pass
         try:
-            r = await client.get(f"{fleet_url}/api/v1/modelplane/deployments", headers=headers)
+            r = await client.get(
+                f"{fleet_url}/api/v1/modelplane/deployments", headers=headers
+            )
             if r.status_code == 200:
                 result["deployments"] = r.json()
         except Exception:
@@ -225,6 +260,7 @@ async def modelplane_status() -> dict:
 @router.post("/classify-prompt")
 async def classify_prompt(request: dict) -> dict:
     from gcl.classifier.prompt_classifier import PromptClassifier
+
     classifier = PromptClassifier()
     prompt = request.get("prompt", "")
     result = classifier.classify(prompt)
@@ -234,12 +270,16 @@ async def classify_prompt(request: dict) -> dict:
 @router.post("/cycle/metrics")
 async def cycle_from_metrics() -> CycleResponse:
     """Pull live platform metrics from fleet-llm-d and run a governed cycle."""
+    _require_non_production_compatibility("/api/v1/cycle/metrics")
     from gcl.loop.signals import FleetMetricsSignalSource
+
     source = FleetMetricsSignalSource()
     signals = source.measure()
 
     if not signals:
-        raise HTTPException(status_code=503, detail="No metrics available from fleet-llm-d")
+        raise HTTPException(
+            status_code=503, detail="No metrics available from fleet-llm-d"
+        )
 
     cycle = await _driver.run_cycle(signals)
     _cycles[str(cycle.cycle_id)] = cycle
@@ -272,17 +312,22 @@ class ClassificationCycleRequest(BaseModel):
 @router.post("/classify-and-run", response_model=CycleResponse)
 async def classify_and_run(request: ClassificationCycleRequest) -> CycleResponse:
     """Accept deepfield-fleet ClassificationRecords, convert to Evidence, run a cycle."""
+    _require_non_production_compatibility("/api/v1/classify-and-run")
     evidence = batch_classifications_to_evidence(request.classifications)
 
     for sig in request.additional_signals:
-        evidence.append(Evidence(
-            metric=sig.get("metric", "unknown"),
-            value=float(sig.get("value", 0)),
-            source=sig.get("source", "external"),
-        ))
+        evidence.append(
+            Evidence(
+                metric=sig.get("metric", "unknown"),
+                value=float(sig.get("value", 0)),
+                source=sig.get("source", "external"),
+            )
+        )
 
     if not evidence:
-        raise HTTPException(status_code=400, detail="No evidence produced from classifications.")
+        raise HTTPException(
+            status_code=400, detail="No evidence produced from classifications."
+        )
 
     cycle = await _driver.run_cycle(evidence)
     _cycles[str(cycle.cycle_id)] = cycle
@@ -301,6 +346,78 @@ async def classify_and_run(request: ClassificationCycleRequest) -> CycleResponse
         correlation_id=cycle.correlation_id,
         committed=cycle.committed,
         execution_verified=cycle.execution_verified,
+        proposal_status=_proposal_status(cycle),
+        decision_package_digest=cycle.decision_package_digest,
+        action_type=action_type,
+        falsification_verdict=verdict,
+    )
+
+
+@router.post("/events/deepfield", response_model=CycleResponse, status_code=202)
+async def accept_deepfield_event(
+    event: DeepFieldCloudEventV1,
+    request: Request,
+) -> CycleResponse:
+    """Accept a DeepField-owned advisory CloudEvent for decision synthesis."""
+    media_type = request.headers.get("Content-Type", "").split(";", 1)[0].strip()
+    if media_type.lower() != "application/cloudevents+json":
+        raise HTTPException(
+            status_code=415,
+            detail="DeepField events require structured CloudEvents media type",
+        )
+    settings = get_settings()
+    if event.source != settings.deepfield_event_source:
+        raise HTTPException(
+            status_code=403, detail="DeepField event source is not trusted"
+        )
+    expected_token = settings.deepfield_event_bearer_token
+    if settings.runtime_mode == "production" and not expected_token:
+        raise HTTPException(
+            status_code=503,
+            detail="production DeepField event credential is not configured",
+        )
+    if expected_token:
+        presented = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(presented, f"Bearer {expected_token}"):
+            raise HTTPException(status_code=401, detail="invalid DeepField credential")
+    if event.is_expired():
+        raise HTTPException(status_code=410, detail="DeepField event is expired")
+
+    remaining_seconds = int(
+        (event.expiresat - datetime.now(timezone.utc)).total_seconds()
+    )
+    if remaining_seconds <= 0:
+        raise HTTPException(status_code=410, detail="DeepField event is expired")
+    decision_ttl_seconds = remaining_seconds
+    if event.type == "io.srex.deepfield.forecast.v1":
+        decision_ttl_seconds = min(
+            decision_ttl_seconds,
+            int(event.data["horizon_seconds"]),
+        )
+
+    evidence = deepfield_event_to_evidence(event)
+    cycle = await _driver.run_cycle(
+        evidence,
+        correlation_id=event.correlationid,
+        causation_id=event.id,
+        idempotency_id=f"gcl:{event.idempotencykey}",
+        tenant=event.tenant,
+        zone=event.zone,
+        decision_ttl_seconds=decision_ttl_seconds,
+    )
+    _cycles[str(cycle.cycle_id)] = cycle
+
+    action_type = None
+    if cycle.action_plan is not None:
+        committed = cycle.action_plan.steps[cycle.action_plan.committed_step_index]
+        action_type = committed.action_type
+    verdict = cycle.falsification.verdict.value if cycle.falsification else None
+
+    return CycleResponse(
+        cycle_id=str(cycle.cycle_id),
+        correlation_id=cycle.correlation_id,
+        committed=cycle.committed,
+        execution_verified=False,
         proposal_status=_proposal_status(cycle),
         decision_package_digest=cycle.decision_package_digest,
         action_type=action_type,

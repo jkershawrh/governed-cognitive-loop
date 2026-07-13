@@ -30,10 +30,26 @@ class TestHealthEndpoint:
 
 class TestCycleEndpoint:
     @pytest.mark.asyncio
+    async def test_manual_cycle_is_disabled_in_production(self, client, monkeypatch):
+        from gcl.config import get_settings
+
+        monkeypatch.setenv("GCL_RUNTIME_MODE", "production")
+        get_settings.cache_clear()
+
+        response = await client.post(
+            "/api/v1/cycle",
+            json={"signals": [{"metric": "latency_ms", "value": 6000.0}]},
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_cycle_returns_response(self, client):
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             response = await client.post(
                 "/api/v1/cycle",
                 json={
@@ -50,9 +66,11 @@ class TestCycleEndpoint:
 
     @pytest.mark.asyncio
     async def test_cycle_inspection(self, client):
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             create_resp = await client.post(
                 "/api/v1/cycle",
                 json={"signals": [{"metric": "latency_ms", "value": 6000.0}]},
@@ -71,9 +89,11 @@ class TestCycleEndpoint:
 
     @pytest.mark.asyncio
     async def test_chain_endpoint(self, client):
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             create_resp = await client.post(
                 "/api/v1/cycle",
                 json={"signals": [{"metric": "latency_ms", "value": 6000.0}]},
@@ -96,9 +116,11 @@ class TestCycleEndpoint:
 class TestListCycles:
     @pytest.mark.asyncio
     async def test_list_cycles(self, client):
-        with patch("gcl.classifier.classifier.get_force_rules", return_value=True), \
-             patch("gcl.interpreter.interpreter.get_force_rules", return_value=True), \
-             patch("gcl.falsification.gate.get_force_rules", return_value=True):
+        with (
+            patch("gcl.classifier.classifier.get_force_rules", return_value=True),
+            patch("gcl.interpreter.interpreter.get_force_rules", return_value=True),
+            patch("gcl.falsification.gate.get_force_rules", return_value=True),
+        ):
             await client.post(
                 "/api/v1/cycle",
                 json={"signals": [{"metric": "latency_ms", "value": 6000.0}]},

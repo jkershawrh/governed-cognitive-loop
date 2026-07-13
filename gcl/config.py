@@ -38,10 +38,18 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "granite-3-2-8b-instruct-cpu"
     ledger_url: str = ""
+    ledger_bearer_token: str = ""
     fleet_url: str = ""
     fleet_token: str = ""
     allow_legacy_fleet_hmac_development_compat: bool = False
+    fleet_intents_url: str = ""
+    fleet_intents_path: str = "/api/v2/intents"
+    fleet_bearer_token: str = ""
+    deepfield_event_source: str = "urn:srex:deepfield-fleet"
+    deepfield_event_bearer_token: str = ""
+    # Deprecated names retained for one compatibility release.
     proposer_url: str = ""
+    proposer_path: str = "/api/v2/intents"
     proposer_bearer_token: str = ""
     decision_signing_key: str = ""
     decision_signing_key_id: str = "gcl-decision-v1"
@@ -49,13 +57,12 @@ class Settings(BaseSettings):
     decision_event_source: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
     proposer_workload_identity: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
     proposer_trust_domain: str = "llm-d.ai"
+    proposer_agent_id: str = "governed-cognitive-loop"
     default_tenant: str = "system"
     default_zone: str = "global"
     traceparent: str = ""
-    authority_url: str = ""
-    authority_agent_id: str = "governed-cognitive-loop"
-    passport_url: str = ""
-    passport_id: str = ""
+    agent_promotion_url: str = ""
+    agent_promotion_bearer_token: str = ""
     force_deterministic: bool = False
 
     model_config = {"env_prefix": "GCL_"}
@@ -74,7 +81,9 @@ def decision_signing_key(settings: Settings) -> bytes:
         try:
             key = base64.b64decode(encoded.removeprefix("base64:"), validate=True)
         except (ValueError, TypeError) as exc:
-            raise ValueError("GCL_DECISION_SIGNING_KEY contains invalid base64") from exc
+            raise ValueError(
+                "GCL_DECISION_SIGNING_KEY contains invalid base64"
+            ) from exc
     else:
         key = encoded.encode("utf-8")
     if not key and settings.runtime_mode == "standalone-test":

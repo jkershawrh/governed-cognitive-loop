@@ -4,16 +4,18 @@
 
 ## Ownership boundary
 
-GCL owns decision synthesis, candidate selection, rejected alternatives, falsification, and package signing. Agent-promotion owns the proposer's autonomy ceiling. Governance-strata owns transaction progression. ARE owns final execution authorization and ledger truth. Fleet owns infrastructure reconciliation.
+GCL owns decision synthesis, candidate selection, rejected alternatives, falsification, and package signing. `deepfield-fleet` owns the observation and forecast inputs. `fleet-llm-d` owns admission, authorization, operation progression, and infrastructure actuation. `are-immutable-ledger` owns immutable evidence receipts and proof verification; its receipts never grant authority. Agent-promotion may contribute optional proposer-ceiling provenance, but that metadata is non-authoritative.
 
 The ordinary path is:
 
 ```text
-evidence -> GCL -> signed DecisionPackage CloudEvent -> proposer authority
-         -> governance-strata -> ARE -> FleetIntent/FleetOperation -> fleet controller
+deepfield-fleet evidence -> GCL -> signed advisory DecisionPackage CloudEvent
+                               -> fleet-llm-d /api/v2/intents
+                               -> FleetIntent/FleetOperation -> actuation
+verified decision and outcome evidence -> are-immutable-ledger
 ```
 
-GCL never invokes the fleet execution API on this path. A successful proposer HTTP response means only that the package was accepted for asynchronous processing. Every GCL proposal result sets `execution_verified` to `false`.
+GCL invokes only fleet-llm-d's asynchronous intent-admission API. It never calls an actuation endpoint. A successful fleet HTTP response means only that the package was accepted for asynchronous processing. Every GCL proposal result sets `execution_verified` to `false`.
 
 ## Required fields
 
@@ -22,16 +24,17 @@ The versioned model is `gcl.llm-d.ai/decision-package/v1`. It carries:
 - an expiry-bounded package ID, correlation ID, causation ID, and idempotency ID;
 - tenant and zone scope;
 - SPIFFE-compatible proposer identity and trust domain;
-- passport and agent-promotion authority decision digests, action class, consequence score, and autonomy ceiling;
+- optional agent-promotion compatibility provenance marked `non_authoritative=true`;
 - typed constraints and their SHA-256 evidence references;
+- explicit evidence producer names, with deepfield-fleet as the core producer;
 - candidates, the selected candidate, and explicitly rejected alternatives;
 - falsification results tied to candidate IDs;
 - bounded confidence and the complete unique evidence digest set;
 - a canonical SHA-256 payload digest, key ID, algorithm, and signature.
 
-Candidate and authority action classes are restricted to `fleet.deploy`, `fleet.scale`, `fleet.route`, `fleet.prewarm`, `fleet.shed_load`, `fleet.migrate`, and `fleet.kv_transfer`. Internal `no_action` decisions emit no package. Legacy `fleet.alert`, `fleet.rollback`, and `fleet.observe` candidates are rejected rather than silently entering the governed execution path.
+Candidate action classes are restricted to `fleet.deploy`, `fleet.scale`, `fleet.route`, `fleet.prewarm`, `fleet.shed_load`, `fleet.migrate`, and `fleet.kv_transfer`. Internal `no_action` decisions emit no package. Legacy `fleet.alert`, `fleet.rollback`, and `fleet.observe` candidates are rejected rather than silently entering the fleet intent path.
 
-Unknown fields are rejected. Timestamps must be timezone-aware. Package expiry cannot outlive the authority attestation. Nested evidence references must exist in the package evidence set. Candidate and selection references are validated.
+Unknown fields are rejected. Timestamps must be timezone-aware. An attached optional compatibility attestation cannot already be expired when the package is created. Nested evidence references must exist in the package evidence set. Candidate and selection references are validated.
 
 ## Canonical digest and signature
 
@@ -41,10 +44,10 @@ Verification checks the key ID when requested, constant-time signature equality,
 
 ## CloudEvents 1.0
 
-The proposer adapter sends structured CloudEvents with content type `application/cloudevents+json` to:
+The fleet adapter sends structured CloudEvents with content type `application/cloudevents+json` to:
 
 ```text
-POST {GCL_PROPOSER_URL}/api/v1/proposals/decision-packages
+POST {GCL_FLEET_INTENTS_URL}/api/v2/intents
 ```
 
 The event type is `ai.llm-d.gcl.decision-package.v1`. Its deterministic event ID is derived from the package ID, package digest, and event type. The envelope carries correlation, causation, idempotency, tenant, zone, trace, expiry, and evidence extensions.
@@ -60,9 +63,9 @@ The producer repository owns these schemas. Downstream releases should pin the p
 
 ## Security modes
 
-`GCL_RUNTIME_MODE=production` is fail closed. Missing or unreachable passport and authority services deny proposal construction. Production also requires explicit signing key material.
+`GCL_RUNTIME_MODE=production` requires explicit signing key material and an OIDC credential for fleet submission. GCL does not make an execution-authorization decision. fleet-llm-d validates, authorizes, and progresses any resulting operation.
 
-Tests must deliberately set `GCL_RUNTIME_MODE=standalone-test`. Only that mode permits labeled test-only passport and authority bypasses and a deterministic test signing key.
+Tests must deliberately set `GCL_RUNTIME_MODE=standalone-test`. Only that mode permits a deterministic test signing key.
 
 Legacy `/api/v1/intents` HMAC submission is disabled by default and always disabled in production. It is available only when both conditions are true:
 
@@ -75,4 +78,4 @@ Even in that compatibility mode, its response is transport acknowledgement only 
 
 ## Evidence level
 
-Focused model, signing, expiry, tamper, schema, CloudEvent, proposer transport, and fail-closed tests execute in this repository. This is contract evidence only. It is not evidence of a restored multi-repository production loop, live fleet actuation, OpenShift operation, external ledger receipts, or release maturity.
+Focused model, signing, expiry, tamper, schema, CloudEvent, fleet transport, and ownership-boundary tests execute in this repository. This is contract evidence only. It is not evidence of an assembled production loop, live fleet actuation, OpenShift operation, external immutable-ledger receipts, or release maturity.

@@ -5,20 +5,27 @@ from typing import Any
 from gcl.domain.contracts import Evidence
 
 _SLO_CLASSES = {
-    "slo_breach_predicted", "slo_breach_imminent", "slo_degraded",
+    "slo_breach_predicted",
+    "slo_breach_imminent",
+    "slo_degraded",
 }
 
 _CAPACITY_CLASSES = {
-    "capacity_saturated", "capacity_pressure", "capacity_elevated",
+    "capacity_saturated",
+    "capacity_pressure",
+    "capacity_elevated",
 }
 
 _COMPLIANCE_CLASSES = {
-    "policy_violation", "compliance_violation",
+    "policy_violation",
+    "compliance_violation",
 }
 
 _SEMANTIC_TIER_CLASSES = {
-    "semantic_tier_simple", "semantic_tier_standard",
-    "semantic_tier_complex", "semantic_tier_specialized",
+    "semantic_tier_simple",
+    "semantic_tier_standard",
+    "semantic_tier_complex",
+    "semantic_tier_specialized",
 }
 
 _SEVERITY_SCORES = {
@@ -28,6 +35,8 @@ _SEVERITY_SCORES = {
     "high": 0.8,
     "critical": 1.0,
 }
+
+DEEPFIELD_SOURCE = "deepfield-fleet"
 
 
 def classification_to_evidence(record: dict[str, Any]) -> list[Evidence]:
@@ -41,13 +50,12 @@ def classification_to_evidence(record: dict[str, Any]) -> list[Evidence]:
     agent_name = record.get("agent_name", "")
     rationale = record.get("rationale", "")
     record_metrics = record.get("metrics", {})
-    record_labels = record.get("labels", {})
-
     common_labels = {
         "class_name": class_name,
         "severity": severity,
         "taxonomy": taxonomy,
         "agent_name": agent_name,
+        "producer": DEEPFIELD_SOURCE,
     }
     common_metadata = {
         "rationale": rationale,
@@ -55,67 +63,88 @@ def classification_to_evidence(record: dict[str, Any]) -> list[Evidence]:
     }
 
     if class_name in _SLO_CLASSES:
-        results.append(Evidence(
-            metric="slo_breach_severity",
-            value=confidence,
-            source="classification",
-            labels=common_labels,
-            metadata=common_metadata,
-        ))
+        results.append(
+            Evidence(
+                metric="slo_breach_severity",
+                value=confidence,
+                source=DEEPFIELD_SOURCE,
+                labels=common_labels,
+                metadata=common_metadata,
+            )
+        )
         forecast_value = record_metrics.get("forecast_value")
         if forecast_value is not None:
             try:
-                results.append(Evidence(
-                    metric="latency_ms",
-                    value=float(forecast_value),
-                    source="classification_metrics",
-                    labels={"contributing_to": class_name, "forecast": "true"},
-                ))
+                results.append(
+                    Evidence(
+                        metric="latency_ms",
+                        value=float(forecast_value),
+                        source=DEEPFIELD_SOURCE,
+                        labels={
+                            "contributing_to": class_name,
+                            "forecast": "true",
+                            "channel": "classification_metrics",
+                        },
+                    )
+                )
             except (TypeError, ValueError):
                 pass
     elif class_name in _CAPACITY_CLASSES:
-        results.append(Evidence(
-            metric="capacity_pressure_score",
-            value=confidence,
-            source="classification",
-            labels=common_labels,
-            metadata=common_metadata,
-        ))
+        results.append(
+            Evidence(
+                metric="capacity_pressure_score",
+                value=confidence,
+                source=DEEPFIELD_SOURCE,
+                labels=common_labels,
+                metadata=common_metadata,
+            )
+        )
     elif class_name in _COMPLIANCE_CLASSES:
-        results.append(Evidence(
-            metric="compliance_violation_flag",
-            value=1.0,
-            source="classification",
-            labels=common_labels,
-            metadata=common_metadata,
-        ))
+        results.append(
+            Evidence(
+                metric="compliance_violation_flag",
+                value=1.0,
+                source=DEEPFIELD_SOURCE,
+                labels=common_labels,
+                metadata=common_metadata,
+            )
+        )
     elif class_name in _SEMANTIC_TIER_CLASSES:
         tier_name = class_name.replace("semantic_tier_", "")
-        results.append(Evidence(
-            metric=f"semantic_tier_{tier_name}_ratio",
-            value=confidence,
-            source="semantic_routing",
-            labels=common_labels,
-            metadata=common_metadata,
-        ))
+        results.append(
+            Evidence(
+                metric=f"semantic_tier_{tier_name}_ratio",
+                value=confidence,
+                source=DEEPFIELD_SOURCE,
+                labels=common_labels,
+                metadata=common_metadata,
+            )
+        )
     else:
         severity_score = _SEVERITY_SCORES.get(severity, 0.5)
-        results.append(Evidence(
-            metric=f"classification_{class_name}",
-            value=severity_score * confidence,
-            source="classification",
-            labels=common_labels,
-            metadata=common_metadata,
-        ))
+        results.append(
+            Evidence(
+                metric=f"classification_{class_name}",
+                value=severity_score * confidence,
+                source=DEEPFIELD_SOURCE,
+                labels=common_labels,
+                metadata=common_metadata,
+            )
+        )
 
     for metric_name, metric_value in record_metrics.items():
         try:
-            results.append(Evidence(
-                metric=metric_name,
-                value=float(metric_value),
-                source="classification_metrics",
-                labels={"contributing_to": class_name},
-            ))
+            results.append(
+                Evidence(
+                    metric=metric_name,
+                    value=float(metric_value),
+                    source=DEEPFIELD_SOURCE,
+                    labels={
+                        "contributing_to": class_name,
+                        "channel": "classification_metrics",
+                    },
+                )
+            )
         except (TypeError, ValueError):
             pass
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gcl.adapter.proposer_adapter import ProposerAdapter
+from gcl.adapter.proposer_adapter import FleetIntentAdapter, ProposerAdapter
 from gcl.committer.committer import Committer
 from gcl.config import get_settings
 from gcl.domain.contracts import ActionStep, FalsificationResult
@@ -15,6 +15,21 @@ from tests.test_decision_package import _signed_package
 
 
 class TestProposerAdapter:
+    def test_proposer_name_is_a_compatibility_alias(self):
+        assert ProposerAdapter is FleetIntentAdapter
+
+    def test_canonical_fleet_environment_is_used(self, monkeypatch):
+        monkeypatch.setenv("GCL_FLEET_INTENTS_URL", "https://fleet.example.test/")
+        monkeypatch.setenv("GCL_FLEET_INTENTS_PATH", "/api/v2/intents")
+        monkeypatch.setenv("GCL_FLEET_BEARER_TOKEN", "fleet-token")
+        get_settings.cache_clear()
+
+        adapter = FleetIntentAdapter()
+
+        assert adapter._url == "https://fleet.example.test"
+        assert adapter._path == "/api/v2/intents"
+        assert adapter._token == "fleet-token"
+
     @pytest.mark.asyncio
     async def test_missing_endpoint_is_not_execution(self):
         result = await ProposerAdapter(url="").propose(_signed_package())
@@ -37,9 +52,9 @@ class TestProposerAdapter:
     async def test_posts_structured_cloudevent_and_normalizes_acknowledgement(self):
         response = MagicMock()
         response.status_code = 202
-        response.content = b'{"status":"executed","operation_id":"op-1"}'
+        response.content = b'{"state":"RECEIVED","operation_id":"op-1"}'
         response.json.return_value = {
-            "status": "executed",
+            "state": "RECEIVED",
             "operation_id": "op-1",
         }
         client = AsyncMock()
@@ -48,20 +63,24 @@ class TestProposerAdapter:
         client.post = AsyncMock(return_value=response)
 
         signed = _signed_package()
-        with patch("gcl.adapter.proposer_adapter.httpx.AsyncClient", return_value=client):
+        with patch(
+            "gcl.adapter.proposer_adapter.httpx.AsyncClient", return_value=client
+        ):
             result = await ProposerAdapter(
                 url="https://proposer.example.test",
                 bearer_token="oidc-token",
             ).propose(signed)
 
         assert result.status == "accepted"
-        assert result.remote_status == "executed"
+        assert result.remote_status == "RECEIVED"
         assert result.execution_verified is False
         assert result.operation_id == "op-1"
         call = client.post.await_args
-        assert call.args[0].endswith("/api/v1/proposals/decision-packages")
+        assert call.args[0].endswith("/api/v2/intents")
         assert call.kwargs["headers"]["Content-Type"] == "application/cloudevents+json"
-        assert call.kwargs["headers"]["Idempotency-Key"] == signed.package.idempotency_id
+        assert (
+            call.kwargs["headers"]["Idempotency-Key"] == signed.package.idempotency_id
+        )
         assert call.kwargs["headers"]["Authorization"] == "Bearer oidc-token"
         event = json.loads(call.kwargs["content"])
         assert event["specversion"] == "1.0"
@@ -71,20 +90,22 @@ class TestProposerAdapter:
     async def test_policy_rejection_stays_rejected(self):
         response = MagicMock()
         response.status_code = 403
-        response.content = b'{"reason":"authority denied"}'
-        response.json.return_value = {"reason": "authority denied"}
+        response.content = b'{"reason":"fleet admission denied"}'
+        response.json.return_value = {"reason": "fleet admission denied"}
         client = AsyncMock()
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
         client.post = AsyncMock(return_value=response)
 
-        with patch("gcl.adapter.proposer_adapter.httpx.AsyncClient", return_value=client):
+        with patch(
+            "gcl.adapter.proposer_adapter.httpx.AsyncClient", return_value=client
+        ):
             result = await ProposerAdapter(
                 url="https://proposer.example.test",
             ).propose(_signed_package())
 
         assert result.status == "rejected"
-        assert result.reason == "authority denied"
+        assert result.reason == "fleet admission denied"
         assert result.execution_verified is False
 
 
@@ -92,10 +113,12 @@ class TestCommitterBoundary:
     @pytest.mark.asyncio
     async def test_surviving_decision_calls_proposer_and_never_actuator(self):
         adapter = MagicMock()
-        adapter.propose = AsyncMock(return_value={
-            "status": "accepted",
-            "execution_verified": True,
-        })
+        adapter.propose = AsyncMock(
+            return_value={
+                "status": "accepted",
+                "execution_verified": True,
+            }
+        )
         adapter.actuate = AsyncMock()
         ledger = LedgerClient(url="")
 

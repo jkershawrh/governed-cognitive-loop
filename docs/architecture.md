@@ -5,9 +5,11 @@
 GCL is one decision producer in the wider governed inference fleet platform:
 
 ```
-rev_deepfield -> GCL -> agent-promotion -> governance-strata -> ARE -> fleet-llm-d
- observations    signed       proposer          transaction      grant    actuation
- and forecasts   package      ceiling           lifecycle        receipt
+deepfield-fleet -> GCL -> fleet-llm-d
+ observations      signed      admission, authorization, operation, actuation
+ and forecasts     advisory package
+                         \
+                          -> are-immutable-ledger (evidence/proof only)
 ```
 
 ## GCL Components
@@ -26,7 +28,8 @@ Supporting adapters:
 | Adapter | Purpose |
 |---|---|
 | ClassificationAdapter | Transforms deepfield-fleet ClassificationRecords to Evidence |
-| ProposerAdapter | Publishes signed DecisionPackage CloudEvents to proposer authority |
+| DeepFieldEventAdapter | Consumes pinned DeepField-owned CloudEvents and preserves producer provenance |
+| FleetIntentAdapter (`ProposerAdapter` compatibility alias) | Publishes signed DecisionPackage CloudEvents to fleet-llm-d intent admission |
 | FleetAdapter | Disabled production compatibility adapter for legacy v1 HMAC submission |
 | IntentMapping | ScaleIntent, PreWarmIntent, ShedLoadIntent, AlertIntent, MigrateIntent |
 
@@ -41,7 +44,7 @@ This system does not claim optimality. The objective is LLM-specified, so classi
 ## Decision Flow
 
 ```
-Evidence arrives (Prometheus, Kubernetes, classification)
+DeepField CloudEvent arrives at /api/v1/events/deepfield
       |
 [1] gcl.classify ---- constraints derived from evidence
 [2] gcl.predict ----- trajectory forecast over horizon
@@ -53,10 +56,11 @@ Evidence arrives (Prometheus, Kubernetes, classification)
       |
 [7] gcl.decision_package.proposed (execution_verified=false)
       |
-[8] CloudEvent 1.0 to proposer authority
-[9] governance-strata and ARE may authorize a FleetIntent/FleetOperation
+[8] CloudEvent 1.0 to fleet-llm-d /api/v2/intents
+[9] fleet-llm-d admits, authorizes, and progresses FleetIntent/FleetOperation
       |
-[10] fleet-llm-d may reconcile an authorized operation
+[10] fleet-llm-d reconciles an authorized operation
+[11] components record evidence receipts in are-immutable-ledger
 ```
 
 ## Receding Horizon
@@ -83,6 +87,6 @@ When compliance and capacity exhaustion occur together, the controller can propo
 
 ## Ledger Chain
 
-Each cycle writes correlated decision entries through the configured ledger client. The signed package carries content and evidence digests. ARE remains the authority for immutable receipt-chain truth. In-memory test ledger entries are not external ARE evidence.
+Each cycle writes correlated decision evidence through the configured `are-immutable-ledger` client. The client uses `POST /api/receipts`, queries `GET /api/receipts/chain`, and can verify with `GET /api/receipts/verify`. Receipts prove recorded evidence; they never authorize fleet execution. In-memory test entries are explicitly local-only evidence.
 
 See [DecisionPackage v1](decision-package-v1.md) for the exact producer contract and security modes.

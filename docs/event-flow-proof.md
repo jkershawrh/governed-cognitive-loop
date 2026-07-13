@@ -5,8 +5,9 @@ This document describes the implemented GCL producer boundary. It does not claim
 ## Decision flow
 
 ```text
-rev_deepfield or conforming producer
+deepfield-fleet
   observation and forecast evidence
+  CloudEvents 1.0 -> POST /api/v1/events/deepfield
       |
       v
 governed-cognitive-loop
@@ -19,7 +20,7 @@ governed-cognitive-loop
       - constraints and evidence SHA-256 references
       - selected candidate and rejected alternatives
       - falsification results and confidence
-      - proposer identity and authority attestation
+      - proposer identity and optional non-authoritative compatibility metadata
       - expiry, correlation, causation, and idempotency
   [7] canonical digest and signature
   [8] gcl.decision_package.proposed
@@ -27,12 +28,16 @@ governed-cognitive-loop
       |
       | CloudEvents 1.0 structured event
       v
-proposer authority endpoint
-  acknowledgement only
+fleet-llm-d /api/v2/intents
+  admission acknowledgement only
       |
       v
-governance-strata -> ARE -> FleetIntent/FleetOperation -> fleet-llm-d
-  external contracts and runtimes, not proven by this repository's unit suite
+FleetIntent/FleetOperation -> fleet authorization -> actuation
+  external runtime behavior, not proven by this repository's unit suite
+      |
+      v
+are-immutable-ledger
+  evidence receipts and proof verification only
 ```
 
 ## GCL record types
@@ -49,7 +54,7 @@ governance-strata -> ARE -> FleetIntent/FleetOperation -> fleet-llm-d
 | `gcl.decision_package.proposal_rejected` | The proposer endpoint rejects the package | Package ID, digest, rejection status, and `execution_verified=false` |
 | `gcl.reject` | A plan or package is rejected | Named failure and reasoning |
 
-These records demonstrate local decision sequencing. Only an ARE receipt-chain verification can establish immutable ecosystem audit truth. The in-memory ledger used by standalone tests cannot establish that truth.
+These records demonstrate local decision sequencing. Only an `are-immutable-ledger` receipt-chain verification can establish external immutable proof. A valid receipt proves that evidence was recorded; it does not grant authority or prove actuation. The in-memory ledger used by standalone tests cannot establish external proof.
 
 ## What local tests establish
 
@@ -58,17 +63,18 @@ Local tests establish:
 1. The objective interpreter does not compute control actions.
 2. Candidate plans honor the deterministic constraint checks covered by the suite.
 3. A surviving candidate is encoded in the strict DecisionPackage v1 model.
-4. Package canonicalization, digest, signature, expiry, and tamper checks execute.
-5. CloudEvent IDs and transport headers are deterministic.
-6. Proposer acknowledgement never sets execution verification.
-7. Missing passport and authority dependencies fail closed in production mode.
-8. Legacy fleet v1 HMAC submission requires an explicit non-production compatibility flag.
+4. DeepField source identity and sink credentials are enforced in production; correlation, causation, idempotency, and evidence digests are preserved.
+5. Package canonicalization, digest, signature, expiry, and tamper checks execute.
+6. CloudEvent IDs and transport headers are deterministic.
+7. Fleet acknowledgement never sets execution verification.
+8. The core loop never calls passport or external execution-authority gates.
+9. Optional agent-promotion results are marked non-authoritative and do not suppress submission.
+10. Legacy fleet v1 HMAC submission requires an explicit non-production compatibility flag.
 
 Local tests do not establish:
 
-- an ARE execution grant;
 - fleet actuation or verified observed state;
-- immutable external ledger receipts;
+- immutable external `are-immutable-ledger` receipts;
 - multi-cluster, OpenShift, performance, chaos, soak, or security promotion evidence.
 
 See [DecisionPackage v1](decision-package-v1.md) for the full contract.

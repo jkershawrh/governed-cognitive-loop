@@ -6,6 +6,8 @@ Cycle-internal contracts are Pydantic v2 models in `gcl/domain/contracts.py`. Th
 
 A single observation from the system: a named metric, its value, and a timestamp. Evidence is the raw input that justifies constraints.
 
+The canonical producer input is a DeepField-owned structured CloudEvent v1 accepted at `POST /api/v1/events/deepfield`. GCL's consumer view pins the producer's four event/schema identities and translates their data into internal Evidence while preserving the producer event ID and SHA-256 evidence references.
+
 ## Constraint
 
 A typed constraint with a bound, a hard/soft flag, and the evidence that justifies it. Every constraint must carry at least one justifying evidence id or it is invalid and must be dropped. Constraints from deterministic rules carry higher confidence than those from the LLM.
@@ -34,6 +36,6 @@ A complete record of one decision cycle: the constraints snapshot, trajectory, o
 
 ## DecisionPackage v1
 
-The signed, expiry-bounded output contract contains proposer and authority attestations, constraints, candidates, rejected alternatives, falsification results, confidence, SHA-256 evidence references, and correlation, causation, and idempotency IDs. It is transported as a structured CloudEvents 1.0 envelope.
+The signed, expiry-bounded advisory output contract contains proposer identity, constraints, candidates, rejected alternatives, falsification results, confidence, SHA-256 evidence references, and correlation, causation, and idempotency IDs. It may contain an agent-promotion compatibility attestation, always marked non-authoritative. It is transported as a structured CloudEvents 1.0 envelope directly to fleet-llm-d intent admission.
 
 See [DecisionPackage v1](decision-package-v1.md) for validation, signing, schema endpoints, security modes, and the ownership boundary.

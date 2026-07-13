@@ -1,6 +1,6 @@
 # Governed Cognitive Loop: Verification and Benchmark Results
 
-> Historical component evidence only. These results predate DecisionPackage v1 and do not establish current live actuation, ARE receipt verification, multi-cluster readiness, or promotion status.
+> Historical component evidence only. These results predate DecisionPackage v1 and do not establish current live fleet authorization or actuation, are-immutable-ledger proof verification, multi-cluster readiness, or promotion status.
 
 **Date:** July 2026
 **Infrastructure:** OpenShift (Oberon), single-node, RHEL CoreOS 9.8, Kubernetes 1.35

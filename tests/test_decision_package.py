@@ -33,12 +33,15 @@ from gcl.domain.enums import ConstraintSource, ConstraintType, Verdict
 KEY = b"a-secure-test-key-with-at-least-thirty-two-bytes"
 
 
-def _signed_package() -> SignedDecisionPackageV1:
+def _signed_package(
+    agent_promotion_attestation: dict | None = None,
+) -> SignedDecisionPackageV1:
     evidence = Evidence(
         metric="latency_ms",
         value=6200,
         timestamp=datetime(2026, 7, 13, tzinfo=timezone.utc),
-        source="rev_deepfield",
+        source="deepfield-fleet",
+        metadata={"producer_evidence_refs": ["sha256:" + "f" * 64]},
     )
     constraint = Constraint(
         type=ConstraintType.LATENCY,
@@ -84,26 +87,17 @@ def _signed_package() -> SignedDecisionPackageV1:
         falsification=falsification,
         evidence=[evidence],
         correlation_id="corr-123",
-        passport_decision={
-            "decision": "ALLOW",
-            "passport_status": "ACTIVE",
-        },
-        authority_decision={
-            "verdict": "allow",
-            "consequence_score": 0.5,
-            "ceiling": 0.8,
-        },
         proposer=ProposerIdentity(
             agent_id="gcl",
             workload_identity="spiffe://llm-d.ai/ns/gcl/sa/controller",
             trust_domain="llm-d.ai",
         ),
-        passport_id="passport-123",
         tenant="tenant-a",
         zone="us-central",
         ttl_seconds=300,
         signing_key=KEY,
         signing_key_id="test-key-v1",
+        agent_promotion_attestation=agent_promotion_attestation,
     )
 
 
@@ -118,11 +112,26 @@ class TestDecisionPackageV1:
         assert len(package.rejected_alternatives) == 1
         assert package.falsification_results[0].verdict == "survives"
         assert package.confidence == 0.87
+        assert package.evidence_sources == ["deepfield-fleet"]
         assert all(ref.startswith("sha256:") for ref in package.evidence_refs)
+        assert "sha256:" + "f" * 64 in package.evidence_refs
         assert package.correlation_id == "corr-123"
         assert package.idempotency_id == "decision:corr-123"
-        assert package.authority.decision == "ALLOW"
+        assert package.agent_promotion is None
         assert package.proposer.workload_identity.startswith("spiffe://")
+
+    def test_optional_agent_promotion_attestation_is_non_authoritative(self):
+        package = _signed_package(
+            {
+                "verdict": "refuse",
+                "consequence_score": 0.7,
+                "ceiling": 0.5,
+            }
+        ).package
+
+        assert package.agent_promotion is not None
+        assert package.agent_promotion.decision == "refuse"
+        assert package.agent_promotion.non_authoritative is True
 
     def test_canonical_signing_and_verification_are_deterministic(self):
         signed = _signed_package()
@@ -165,7 +174,7 @@ class TestDecisionPackageV1:
         with pytest.raises(ValidationError, match="timezone"):
             DecisionPackageV1.model_validate(payload)
 
-    def test_noncanonical_are_action_class_is_rejected(self):
+    def test_noncanonical_fleet_action_class_is_rejected(self):
         with pytest.raises(ValidationError):
             DecisionCandidate(
                 candidate_id="candidate-alert",
@@ -173,6 +182,20 @@ class TestDecisionPackageV1:
                 parameters={},
                 confidence=0.9,
             )
+
+    def test_selected_candidate_must_survive_falsification(self):
+        payload = _signed_package().package.model_dump(mode="json")
+        payload["falsification_results"][0]["verdict"] = "fails"
+        with pytest.raises(ValidationError, match="must survive"):
+            DecisionPackageV1.model_validate(payload)
+
+    def test_selected_candidate_requires_falsification_evidence(self):
+        payload = _signed_package().package.model_dump(mode="json")
+        payload["falsification_results"][0]["candidate_id"] = payload["candidates"][1][
+            "candidate_id"
+        ]
+        with pytest.raises(ValidationError, match="requires a falsification result"):
+            DecisionPackageV1.model_validate(payload)
 
 
 class TestDecisionPackageCloudEvent:

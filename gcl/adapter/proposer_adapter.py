@@ -4,7 +4,7 @@ import logging
 from typing import Literal, Optional
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from gcl.config import get_settings
 from gcl.domain.decision_package import (
@@ -14,7 +14,7 @@ from gcl.domain.decision_package import (
 
 
 logger = logging.getLogger(__name__)
-DEFAULT_PROPOSAL_PATH = "/api/v1/proposals/decision-packages"
+DEFAULT_PROPOSAL_PATH = "/api/v2/intents"
 
 
 class ProposalResult(BaseModel):
@@ -33,25 +33,32 @@ class ProposalResult(BaseModel):
     execution_verified: Literal[False] = False
 
 
-class ProposerAdapter:
-    """Publish signed GCL decisions to proposer authority as CloudEvents 1.0."""
+class FleetIntentAdapter:
+    """Submit advisory DecisionPackage events to fleet-llm-d admission."""
 
     def __init__(
         self,
         url: Optional[str] = None,
         bearer_token: Optional[str] = None,
         *,
-        proposal_path: str = DEFAULT_PROPOSAL_PATH,
+        proposal_path: Optional[str] = None,
         timeout_seconds: float = 10.0,
     ):
         settings = get_settings()
-        self._url = (url if url is not None else settings.proposer_url).rstrip("/")
+        configured_url = settings.fleet_intents_url or settings.proposer_url
+        self._url = (url if url is not None else configured_url).rstrip("/")
         self._token = (
             bearer_token
             if bearer_token is not None
-            else settings.proposer_bearer_token
+            else settings.fleet_bearer_token or settings.proposer_bearer_token
         )
-        self._path = "/" + proposal_path.strip("/")
+        configured_path = (
+            proposal_path
+            or settings.fleet_intents_path
+            or settings.proposer_path
+            or DEFAULT_PROPOSAL_PATH
+        )
+        self._path = "/" + configured_path.strip("/")
         self._timeout = timeout_seconds
         self._source = settings.decision_event_source
         self._traceparent = settings.traceparent or None
@@ -66,13 +73,13 @@ class ProposerAdapter:
         if not self._url:
             return ProposalResult(
                 status="not_configured",
-                reason="proposer endpoint is not configured",
+                reason="fleet intent endpoint is not configured",
                 **base,
             )
         if self._runtime_mode == "production" and not self._token:
             return ProposalResult(
                 status="rejected",
-                reason="production proposer OIDC credential is not configured",
+                reason="production fleet OIDC credential is not configured",
                 **base,
             )
 
@@ -98,7 +105,7 @@ class ProposerAdapter:
                     headers=headers,
                 )
         except httpx.HTTPError as exc:
-            logger.warning("Decision proposal delivery deferred: %s", exc)
+            logger.warning("Fleet intent delivery deferred: %s", exc)
             return ProposalResult(status="deferred", reason=str(exc), **base)
 
         payload: dict = {}
@@ -116,7 +123,9 @@ class ProposerAdapter:
                 proposal_id=payload.get("proposal_id") or payload.get("intent_id"),
                 operation_id=payload.get("operation_id"),
                 status_url=payload.get("status_url"),
-                remote_status=str(payload.get("status", "accepted")),
+                remote_status=str(
+                    payload.get("state", payload.get("status", "accepted"))
+                ),
                 **base,
             )
         if 400 <= response.status_code < 500:
@@ -124,11 +133,15 @@ class ProposerAdapter:
                 status="rejected",
                 reason=payload.get("reason")
                 or payload.get("detail")
-                or f"proposer returned HTTP {response.status_code}",
+                or f"fleet admission returned HTTP {response.status_code}",
                 **base,
             )
         return ProposalResult(
             status="deferred",
-            reason=f"proposer returned HTTP {response.status_code}",
+            reason=f"fleet admission returned HTTP {response.status_code}",
             **base,
         )
+
+
+# Compatibility import for existing GCL callers. The runtime owner is fleet.
+ProposerAdapter = FleetIntentAdapter

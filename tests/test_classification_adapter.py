@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from gcl.adapter.classification_adapter import (
     batch_classifications_to_evidence,
     classification_to_evidence,
@@ -21,7 +19,7 @@ class TestClassificationAdapter:
         primary = [e for e in results if e.metric == "slo_breach_severity"]
         assert len(primary) == 1
         assert primary[0].value == 0.85
-        assert primary[0].source == "classification"
+        assert primary[0].source == "deepfield-fleet"
 
     def test_capacity_pressure_to_evidence(self):
         record = {
