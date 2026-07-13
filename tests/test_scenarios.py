@@ -314,26 +314,26 @@ class TestOutcomeTrackingAfterScaleBDD:
             with p1, p2, p3:
                 cycle2 = await driver.run_cycle(low_signals)
 
-            # Verify outcome was logged
+            # Proposal acceptance is not execution evidence. A later metric
+            # window alone cannot create a verified outcome.
             entries = await ledger.query_chain(cycle2.correlation_id)
             entry_types = {e["entry_type"] for e in entries}
-            assert "gcl.outcome" in entry_types, (
-                "Outcome entry should be written after scale + recovery"
-            )
+            assert "gcl.outcome" not in entry_types
 
 
-class TestFleetResponseCapturedBDD:
-    """Given a fleet adapter returns a response, when the loop commits,
-    then the fleet response is captured on the LoopCycle."""
+class TestProposalResponseCapturedBDD:
+    """A proposer acknowledgement is captured without implying execution."""
 
     @pytest.mark.asyncio
     async def test_fleet_response_on_cycle(self, ledger):
         from unittest.mock import AsyncMock, MagicMock
         mock_adapter = MagicMock()
-        mock_adapter.actuate = AsyncMock(return_value={
-            "status": "executed",
-            "intent_id": "fleet-123",
+        mock_adapter.propose = AsyncMock(return_value={
+            "status": "accepted",
+            "proposal_id": "proposal-123",
+            "execution_verified": False,
         })
+        mock_adapter.actuate = AsyncMock()
 
         driver = LoopDriver(ledger=ledger, adapter=mock_adapter)
 
@@ -347,7 +347,7 @@ class TestFleetResponseCapturedBDD:
             cycle = await driver.run_cycle(signals)
 
         if cycle.committed:
-            assert cycle.fleet_response is not None, (
-                "Fleet response should be captured on LoopCycle"
-            )
-            assert cycle.fleet_response["status"] == "executed"
+            assert cycle.proposal_response is not None
+            assert cycle.proposal_response["status"] == "accepted"
+            assert cycle.execution_verified is False
+            mock_adapter.actuate.assert_not_called()

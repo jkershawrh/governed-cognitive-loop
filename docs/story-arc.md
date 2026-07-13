@@ -2,7 +2,7 @@
 
 **Belief sentence:** It makes hard calls the way a careful expert does, and it never skips the step where it tries to prove itself wrong.
 
-**Honesty constraint:** This system does not claim optimality or perfection. The guarantee is hard-constraint satisfaction and falsification-gated commit, not that it is always right.
+**Honesty constraint:** This system does not claim optimality, perfection, execution, or production readiness. Local evidence covers decision-package construction and falsification, not infrastructure outcomes.
 
 ---
 
@@ -46,9 +46,9 @@
 
 **Human truth:** A careful expert thinks several moves ahead but does not lock in the whole plan, because the situation will change. They take the next step and reassess. The overcommitter executes a five-step plan even as the facts move.
 
-**Live behavior:** The `HorizonPredictor` (`gcl/predictor/predictor.py`) produces a trajectory over the planning horizon with confidence from linear regression. The `Controller` (`gcl/controller/controller.py`) computes an action plan under hard constraints using numpy, but commits only the first step (`committed_step_index == 0`). Each cycle re-measures and re-plans from fresh data. A disturbance arrives mid-scenario, the trajectory is redrawn, and the plan adjusts.
+**Live behavior:** The `HorizonPredictor` (`gcl/predictor/predictor.py`) produces a trajectory over the planning horizon with confidence from linear regression. The `Controller` (`gcl/controller/controller.py`) computes candidate actions under hard constraints using numpy, but selects only the first step (`committed_step_index == 0`). Each cycle re-measures and re-plans from fresh data. A disturbance arrives mid-scenario, the trajectory is redrawn, and the plan adjusts.
 
-**Drawn:** The HorizonPlot as the centerpiece. Measured history left of a "NOW" line, predicted trajectory right of it (dashed blue), confidence envelope (shaded blue area), hard-constraint boundaries (shaded red), the committed first step (green circle with "COMMITTED" label), and the trajectory visibly redrawn when the disturbance lands (animated pathLength).
+**Drawn:** The HorizonPlot as the centerpiece. Measured history left of a "NOW" line, predicted trajectory right of it (dashed blue), confidence envelope (shaded blue area), hard-constraint boundaries (shaded red), the selected first step (green circle with "SELECTED" label), and the trajectory visibly redrawn when the disturbance lands (animated pathLength).
 
 **Thread planted:** It committed only one step and re-planned, and the goal it optimized came from somewhere.
 
@@ -64,9 +64,9 @@
 
 **Human truth:** You want judgment about the goal to be explainable, and you do not want the fast, fallible part of the mind holding the lever that cannot be pulled back. Frame the problem with intuition, execute it with discipline.
 
-**Live behavior:** The `ObjectiveInterpreter` (`gcl/interpreter/interpreter.py`), backed by the LLM or a deterministic template, reads context and produces an `ObjectiveSpec` (cost terms, weights, rationale). But the deterministic `Controller` owns constraint satisfaction and the commit. The interpreter has no code path that returns an action (verified by AST inspection in tests). The full `LoopCycle` is written to the ledger under one correlation ID: constraints, trajectory, objective, plan, falsification result, and commit/reject outcome.
+**Live behavior:** The `ObjectiveInterpreter` (`gcl/interpreter/interpreter.py`), backed by the LLM or a deterministic template, reads context and produces an `ObjectiveSpec` (cost terms, weights, rationale). The deterministic `Controller` owns candidate computation and constraint checks. The interpreter has no code path that returns an action (verified by AST inspection in tests). A surviving consequential candidate is encoded in a signed `DecisionPackage` and proposed with `execution_verified=false`.
 
-**Drawn:** The honesty boundary as two connected boxes: "ObjectiveInterpreter (LLM)" with purple border feeding "objective only" into "Controller (deterministic)" with green border. The LedgerChain renders all entries (gcl.classify, gcl.predict, gcl.interpret, gcl.plan, gcl.falsify, gcl.commit/gcl.reject) as a vertical timeline.
+**Drawn:** The honesty boundary as two connected boxes: "ObjectiveInterpreter (LLM)" with purple border feeding "objective only" into "Controller (deterministic)" with green border. The LedgerChain renders decision entries ending in `gcl.decision_package.proposed` or `gcl.reject`.
 
 **Thread planted:** The creative part never touches the safety-critical lever, and the whole decision is on the record.
 
@@ -74,7 +74,7 @@
 
 **Humor beat:** It lets the imaginative part brainstorm the goal but keeps it nowhere near the launch button, which is more discipline than most org charts manage.
 
-**Turn:** A human's intuition and their execution live in the same fallible head, and this system claims no optimality either. Only that hard constraints hold and the plan survived a challenge. It separates the creative framing from the guaranteed execution and keeps the receipt, which a person cannot.
+**Turn:** A human's intuition and execution live in the same fallible head, and this system claims no optimality either. It separates creative framing from deterministic candidate checks and emits a reviewable signed proposal. fleet-llm-d remains responsible for authorization and observed execution; are-immutable-ledger records evidence receipts but grants no authority.
 
 ---
 

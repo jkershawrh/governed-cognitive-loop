@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from gcl.domain.contracts import LoopCycle
 
@@ -20,7 +20,12 @@ class CycleRequest(BaseModel):
 class CycleResponse(BaseModel):
     cycle_id: str
     correlation_id: str
-    committed: bool
+    committed: bool = Field(
+        description="The decision package was committed. This is not execution success."
+    )
+    execution_verified: bool = False
+    proposal_status: Optional[str] = None
+    decision_package_digest: Optional[str] = None
     action_type: Optional[str] = None
     falsification_verdict: Optional[str] = None
 

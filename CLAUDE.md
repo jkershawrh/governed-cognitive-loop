@@ -65,10 +65,18 @@ oc apply -f deploy/deployment.yaml
 
 | Variable | Default | Purpose |
 |---|---|---|
+| GCL_RUNTIME_MODE | production | Secure runtime mode; tests explicitly use standalone-test |
 | GCL_FORCE_DETERMINISTIC | false | Skip all LLM calls, use deterministic fallbacks |
-| GCL_LEDGER_URL | (empty) | ARE ledger REST gateway URL |
-| GCL_FLEET_URL | (empty) | fleet-llm-d controller URL |
-| GCL_FLEET_TOKEN | (empty) | Shared secret for HMAC-SHA256 fleet auth |
+| GCL_LEDGER_URL | (empty) | are-immutable-ledger REST gateway URL |
+| GCL_LEDGER_BEARER_TOKEN | (empty) | Optional ledger gateway bearer token |
+| GCL_FLEET_INTENTS_URL | (empty) | fleet-llm-d control API base URL |
+| GCL_FLEET_INTENTS_PATH | /api/v2/intents | Fleet DecisionPackage admission path |
+| GCL_FLEET_BEARER_TOKEN | (empty) | OIDC bearer token for fleet submission |
+| GCL_DEEPFIELD_EVENT_SOURCE | urn:srex:deepfield-fleet | Trusted DeepField CloudEvent source |
+| GCL_DEEPFIELD_EVENT_BEARER_TOKEN | (empty) | Required production DeepField sink credential |
+| GCL_AGENT_PROMOTION_URL | (empty) | Optional non-authoritative compatibility metadata source |
+| GCL_DECISION_SIGNING_KEY | (empty) | At least 32 bytes of external signing key material |
+| GCL_ALLOW_LEGACY_FLEET_HMAC_DEVELOPMENT_COMPAT | false | Explicit non-production legacy fleet v1 switch |
 | GCL_LEDGER_SKIP | (unset) | Skip ledger reachability in preflight |
 | GCL_MAX_SCALE_REPLICAS | 20 | Upper bound on any single scale action |
 | GCL_SPIKE_DETECTION_THRESHOLD | 2.0 | Peak-to-baseline ratio for spike detection |

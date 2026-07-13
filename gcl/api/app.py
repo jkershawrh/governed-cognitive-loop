@@ -15,7 +15,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Governed Cognitive Loop",
         version="0.1.0",
-        description="LLM-MPC with evidence-based constraint classification and hypothesis falsification before commit.",
+        description=(
+            "Governed decision synthesis and falsification. Surviving decisions are "
+            "signed proposals, never claims of infrastructure execution."
+        ),
     )
 
     origins = os.environ.get("GCL_CORS_ORIGINS", "http://localhost:3000").split(",")

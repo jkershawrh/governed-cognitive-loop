@@ -17,6 +17,16 @@ from gcl.domain.contracts import (
     TrajectoryPoint,
 )
 from gcl.domain.enums import ConstraintSource, ConstraintType, Verdict
+from gcl.config import get_settings
+
+
+@pytest.fixture(autouse=True)
+def deliberate_standalone_test_runtime(monkeypatch):
+    """Tests opt in to the only fail-open runtime mode."""
+    monkeypatch.setenv("GCL_RUNTIME_MODE", "standalone-test")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
-import os
+import base64
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import Field
@@ -19,6 +20,7 @@ def _load_yaml(name: str) -> dict:
 
 
 class Settings(BaseSettings):
+    runtime_mode: Literal["production", "development", "standalone-test"] = "production"
     horizon_length: int = Field(default=10, gt=0)
     confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     falsification_confidence_floor: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -36,12 +38,31 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "granite-3-2-8b-instruct-cpu"
     ledger_url: str = ""
+    ledger_bearer_token: str = ""
     fleet_url: str = ""
     fleet_token: str = ""
-    authority_url: str = ""
-    authority_agent_id: str = "governed-cognitive-loop"
-    passport_url: str = ""
-    passport_id: str = ""
+    allow_legacy_fleet_hmac_development_compat: bool = False
+    fleet_intents_url: str = ""
+    fleet_intents_path: str = "/api/v2/intents"
+    fleet_bearer_token: str = ""
+    deepfield_event_source: str = "urn:srex:deepfield-fleet"
+    deepfield_event_bearer_token: str = ""
+    # Deprecated names retained for one compatibility release.
+    proposer_url: str = ""
+    proposer_path: str = "/api/v2/intents"
+    proposer_bearer_token: str = ""
+    decision_signing_key: str = ""
+    decision_signing_key_id: str = "gcl-decision-v1"
+    decision_package_ttl_seconds: int = Field(default=300, gt=0, le=3600)
+    decision_event_source: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
+    proposer_workload_identity: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
+    proposer_trust_domain: str = "llm-d.ai"
+    proposer_agent_id: str = "governed-cognitive-loop"
+    default_tenant: str = "system"
+    default_zone: str = "global"
+    traceparent: str = ""
+    agent_promotion_url: str = ""
+    agent_promotion_bearer_token: str = ""
     force_deterministic: bool = False
 
     model_config = {"env_prefix": "GCL_"}
@@ -51,6 +72,25 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     defaults = _load_yaml("loop.yaml")
     return Settings(**{k: v for k, v in defaults.items() if v is not None})
+
+
+def decision_signing_key(settings: Settings) -> bytes:
+    """Resolve signing key material without silently weakening production."""
+    encoded = settings.decision_signing_key
+    if encoded.startswith("base64:"):
+        try:
+            key = base64.b64decode(encoded.removeprefix("base64:"), validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                "GCL_DECISION_SIGNING_KEY contains invalid base64"
+            ) from exc
+    else:
+        key = encoded.encode("utf-8")
+    if not key and settings.runtime_mode == "standalone-test":
+        key = b"standalone-test-decision-signing-key-not-for-production"
+    if len(key) < 32:
+        raise ValueError("GCL_DECISION_SIGNING_KEY must contain at least 32 bytes")
+    return key
 
 
 def get_constraint_rules() -> list[dict]:

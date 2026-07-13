@@ -1,155 +1,134 @@
 # Governed Cognitive Loop
 
-The governed autonomy layer for AI inference fleet management. It sits between prediction (deepfield-fleet) and actuation (fleet-llm-d), ensuring every infrastructure decision is constrained, challenged, and recorded before it executes.
+The governed decision-synthesis layer for AI inference fleet management. It turns observations and forecasts into strict, signed, expiry-bounded `DecisionPackage` proposals. GCL does not authorize or execute infrastructure changes.
 
-## Platform Architecture
+## Platform boundary
 
-```
-deepfield-fleet ──classifications──> GCL ──intents──> fleet-llm-d
-  (predictive brain)             (governed       (fleet controller)
-                                  autonomy)  |
-                                             └──every decision──> ARE Immutable Ledger
-                                                                   (audit backbone)
+```text
+deepfield-fleet -> GCL -> fleet-llm-d
+ observations      signed      admission, authorization, operations, actuation
+ and forecasts     advisory DecisionPackage
+                         \
+                          -> are-immutable-ledger (evidence and proof only)
 ```
 
 | System | Owns | Does not own |
 |---|---|---|
-| **deepfield-fleet** | Observation, classification, prediction | Decisions, actuation |
-| **governed-cognitive-loop** | Constraint derivation, optimization, falsification, commit/reject | Raw observation, actuation |
-| **fleet-llm-d** | Policy enforcement, actuation, cluster management | Classification, planning |
-| **ARE Immutable Ledger** | Hash-chained audit trail, chain verification | Any decisions |
+| `deepfield-fleet` | Observations, findings, forecasts | Decisions, authorization, actuation |
+| GCL | Decision synthesis, alternatives, falsification, signed package | Authorization, actuation |
+| `fleet-llm-d` | Intent admission, authorization, desired/observed/operation state, actuation | Forecasting, decision synthesis |
+| [`are-immutable-ledger`](https://github.com/jkershawrh/are-immutable-ledger) | Immutable evidence receipts and proof verification | Authorization, admission, actuation |
+| agent-promotion (optional) | Non-authoritative proposer-ceiling provenance | Fleet admission or execution authorization |
 
-## What It Does
+## Decision cycle
 
 Every governed cycle follows this chain:
 
-1. **Classify** constraints from evidence (deterministic rules first, LLM for ambiguous)
-2. **Predict** a trajectory over the planning horizon (linear regression + spike detection)
-3. **Interpret** an objective (LLM or template sets the goal, never the action)
-4. **Optimize** an action plan under hard constraints (numpy, deterministic)
-5. **Falsify** the committed step (7 disconfirmation checks try to break the plan)
-6. **Commit** only what survives (or reject with the reason named)
-7. **Record** the full decision chain to the ARE ledger under one correlation ID
+1. Classify constraints from evidence, deterministic rules first and an LLM only for ambiguity.
+2. Predict a trajectory over the planning horizon.
+3. Interpret an objective. The LLM can set the goal but never the action.
+4. Compute candidate actions under hard constraints with the deterministic controller.
+5. Falsify the selected candidate with disconfirmation checks.
+6. Build and sign an advisory `DecisionPackage` with candidates, rejected alternatives, evidence digests, confidence, and expiry.
+7. Submit the package as a structured CloudEvents 1.0 event to fleet-llm-d's `/api/v2/intents` boundary.
 
-## The Honesty Boundary
+The `LoopCycle.committed` field means that a decision package was committed after falsification. It does not mean infrastructure execution. Proposal acknowledgements always report `execution_verified=false`.
 
-- The LLM interprets context into an objective and predicts disturbances. That is all.
-- The LLM never computes the committed action and never performs constraint satisfaction. A deterministic controller owns optimization.
-- This system does not claim optimality. The guarantee is: hard-constraint satisfaction and falsification-gated commit.
-- Falsification seeks disconfirmation. It tries to break the plan, not confirm it.
+The canonical input boundary is:
 
-## Action Types
+```text
+POST /api/v1/events/deepfield
+Content-Type: application/cloudevents+json
+```
 
-| Action | When | Intent sent to |
+It consumes DeepField-owned observation, finding, forecast, and advisory
+remediation CloudEvents v1. GCL pins their event/schema identities without
+claiming ownership of their payload contracts. Expired or mismatched events
+are rejected; correlation, causation, idempotency, and evidence digests flow
+into the resulting DecisionPackage.
+
+Production requires the configured DeepField source and
+`GCL_DEEPFIELD_EVENT_BEARER_TOKEN`. Manual `/cycle`, direct fleet-metrics, and
+legacy `/classify-and-run` ingestion are development/test compatibility paths
+and return `403` in production.
+
+## Action candidates
+
+| Action | Example trigger | DecisionPackage action class |
 |---|---|---|
-| `no_action` | System stable, no intervention needed | (none) |
-| `scale` | Latency breach, capacity available | fleet-llm-d ScaleIntent |
-| `pre_warm` | Approaching SLO threshold | fleet-llm-d PreWarmIntent |
-| `shed_load` | Capacity exhausted, latency breached | fleet-llm-d ShedLoadIntent |
-| `alert` | Compliance constraint active | fleet-llm-d AlertIntent |
-| `migrate` | Compliance + capacity exhaustion (cross-cluster) | fleet-llm-d MigrateIntent |
-| `rollback` | Actuation verification failure or outcome drift | fleet-llm-d RollbackIntent |
+| `no_action` | Stable system | Internal only, no package emitted |
+| `scale` | Latency breach with capacity | `fleet.scale` |
+| `pre_warm` | Approaching an SLO threshold | `fleet.prewarm` |
+| `shed_load` | Exhausted capacity and latency breach | `fleet.shed_load` |
+| `alert` | Compliance constraint without an actionable target | Rejected from the fleet proposal contract |
+| `migrate` | Compliance and capacity exhaustion | `fleet.migrate` |
+| `rollback` | Legacy recovery candidate | Rejected; fleet-llm-d owns operation compensation |
 
-## Verified Results
+Only canonical fleet action classes are accepted in a `DecisionPackage`: `fleet.deploy`, `fleet.scale`, `fleet.route`, `fleet.prewarm`, `fleet.shed_load`, `fleet.migrate`, and `fleet.kv_transfer`.
 
-| Metric | Value |
-|---|---|
-| Tests | 782 (unit + property + BDD + EDD) |
-| EDD rubric dimensions | 24/24 green |
-| Scenarios | 6 (inference spike, compliance, capacity exhaustion, SLO cascade, mixed storm, multi-cluster) |
-| Edge case simulations | 24/24 pass, 0 crashes, 4/4 behavioral correctness |
-| Ledger entries (Oberon) | 1,400 (1,272 GCL), all chains cryptographically valid |
-| Governed cycles | 200+ committed and rejected with named reasons |
-| Composite confidence | 99% for CPU inference scaling |
-| Post-commit verification | Outcome ledger (gcl.outcome), decision cooldown (60s default), fleet response tracking |
-| Actuation verification | gcl.actuation_verified entries confirm fleet-llm-d accepted and executed intents |
-| Time-aware constraints | Maintenance window enforcement, time-of-day scaling policy |
-| Chaos resilience | gcl.cycle_start entries, graceful degradation under component failure |
-| Decision cooldown | 60-second default cooldown prevents action oscillation between cycles |
-| Authority gate | Wired to agent-promotion-line (consequence-based authority, track record from ledger) |
-| Semantic routing | Prompt classification into simple/standard/complex tiers (classify-prompt endpoint live) |
-| Centralized metrics | Platform metrics API live (GET /api/v1/metrics/platform) |
+## Security modes
 
-See [benchmarks](docs/benchmarks/gcl-benchmarks.md) and [white paper](docs/whitepaper/governed-cognitive-loop-whitepaper.md) for details.
+Production requires explicit decision-signing key material and an OIDC credential for fleet submission. GCL does not call an external authorization service: fleet-llm-d authenticates the caller, validates the signed advisory package, authorizes any resulting operation, and owns actuation.
 
-## Quick Start
-
-### Local development
+Standalone tests must deliberately opt in:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+GCL_RUNTIME_MODE=standalone-test
+```
+
+Only that mode permits the deterministic test signing key. Legacy fleet v1 HMAC submission is always disabled in production and requires both of these development settings:
+
+```bash
+GCL_RUNTIME_MODE=development
+GCL_ALLOW_LEGACY_FLEET_HMAC_DEVELOPMENT_COMPAT=true
+```
+
+The legacy response is transport acknowledgement only and never verified execution.
+
+## Current evidence level
+
+The repository has executable unit, property, scenario, DecisionPackage, CloudEvent, fleet transport, and security-boundary tests. Those tests are contract and component evidence. They are not live fleet execution, external immutable-ledger proof, multi-cluster OpenShift, performance, chaos, soak, security-audit, Blue, or Gold evidence.
+
+Historical benchmark documents remain useful test-design context. Their environment-specific observations are not current promotion evidence without a reproducible external evidence bundle.
+
+## Local development
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-GCL_FORCE_DETERMINISTIC=1 GCL_LEDGER_SKIP=1 bash verify.sh
+GCL_RUNTIME_MODE=standalone-test GCL_FORCE_DETERMINISTIC=1 python -m pytest -q
 ```
 
-### Podman (full stack with ledger)
+Run the API locally:
 
 ```bash
-python3 -m podman_compose up -d
-# GCL app: http://localhost:8000
-# Includes: postgres, ARE ledger, REST gateway, GCL app + frontend
+GCL_RUNTIME_MODE=standalone-test uvicorn gcl.api.app:create_app --factory --port 8000
 ```
 
-### OpenShift (Oberon)
+Schema exports:
 
-```bash
-oc apply -f deploy/namespace.yaml
-oc apply -f deploy/deployment.yaml
-# Connects to fleet-llm-d and ARE ledger in adjacent namespaces
+```text
+GET /api/v1/contracts/decision-package-v1/schema
+GET /api/v1/contracts/decision-package-cloudevent-v1/schema
 ```
 
-### Run a scenario
+The fleet intent endpoint is:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/scenario/seed \
-  -H 'Content-Type: application/json' \
-  -d '{"scenario": "inference_fleet_spike", "seed": 42}'
-
-# Step through 8 cycle steps
-for i in $(seq 0 7); do
-  signals=$(curl -s http://localhost:8000/api/v1/scenario/step/$i | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['signals']))")
-  curl -X POST http://localhost:8000/api/v1/cycle \
-    -H 'Content-Type: application/json' -d "{\"signals\": $signals}"
-done
+```text
+POST {GCL_FLEET_INTENTS_URL}/api/v2/intents
+Content-Type: application/cloudevents+json
 ```
 
-### Send classifications from deepfield-fleet
-
-```bash
-curl -X POST http://localhost:8000/api/v1/classify-and-run \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "classifications": [{
-      "class_name": "slo_breach_predicted",
-      "severity": "critical",
-      "confidence": 0.92,
-      "metrics": {"forecast_value": 6200}
-    }],
-    "additional_signals": [
-      {"metric": "replicas", "value": 3},
-      {"metric": "max_replicas", "value": 10}
-    ]
-  }'
-```
-
-## Frontend Demo
-
-The React frontend (built with the deepfield-multimodal visual system) provides a navigable story-arc demo with 4 layers:
-
-- **Layer 0 (Hook):** Falsification gate rejects a bad action
-- **Layer 1 (Evidence):** Constraints derived from evidence, not stale rules
-- **Layer 2 (Lookahead):** Horizon plot with trajectory, constraints, committed step
-- **Layer 3 (Floor):** LLM/Controller honesty boundary and ledger chain
-
-Start the backend and open `http://localhost:8000`. Press Enter to begin.
+`GCL_AGENT_PROMOTION_URL` is optional compatibility metadata. If configured,
+its attestation is embedded as `non_authoritative=true`; allow, refuse, and
+unavailable results never decide whether GCL submits the package.
 
 ## Documentation
 
-- [White Paper](docs/whitepaper/governed-cognitive-loop-whitepaper.md)
-- [Benchmarks](docs/benchmarks/gcl-benchmarks.md)
-- [Event Flow Proof](docs/event-flow-proof.md)
+- [DecisionPackage v1](docs/decision-package-v1.md)
 - [Architecture](docs/architecture.md)
-- [Story Arc](docs/story-arc.md)
-- [SA Walkthrough](docs/walkthrough.md)
-- [Beat-to-Cycle Mapping](docs/MAPPING.md)
-- [Data Contracts](docs/contracts.md)
+- [Data contracts](docs/contracts.md)
+- [Event flow and evidence boundary](docs/event-flow-proof.md)
+- [White paper](docs/whitepaper/governed-cognitive-loop-whitepaper.md)
+- [Historical benchmark context](docs/benchmarks/gcl-benchmarks.md)

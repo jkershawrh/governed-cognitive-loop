@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Optional
 
@@ -7,15 +8,32 @@ from gcl.domain.contracts import Evidence, Trajectory, TrajectoryPoint
 from gcl.predictor.slo_seed import linear_regression
 
 
+_DEEPFIELD_FORECAST_EVENT_TYPE = "io.srex.deepfield.forecast.v1"
+
+
 class HorizonPredictor:
     def predict(self, signals: list[Evidence], horizon_steps: int) -> Trajectory:
         if not signals:
             return self._flat_trajectory(0.0, horizon_steps, confidence=0.0)
 
+        deepfield_forecast = self._deepfield_forecast(signals)
+        if deepfield_forecast is not None:
+            signal, confidence = deepfield_forecast
+            return Trajectory(
+                points=[TrajectoryPoint(step=0, value=signal.value)],
+                horizon_steps=1,
+                confidence=confidence,
+                generated_at=signal.timestamp,
+            )
+
         # Check for classification forecast data
-        forecast_signals = [s for s in signals if s.source == "classification_metrics"
-                            and s.metric == "latency_ms"
-                            and s.labels.get("forecast") == "true"]
+        forecast_signals = [
+            s
+            for s in signals
+            if s.source == "classification_metrics"
+            and s.metric == "latency_ms"
+            and s.labels.get("forecast") == "true"
+        ]
         if forecast_signals:
             forecast_value = forecast_signals[0].value
             conf = 0.85  # classification-backed predictions are high confidence
@@ -74,6 +92,42 @@ class HorizonPredictor:
             confidence=confidence,
         )
 
+    def _deepfield_forecast(
+        self,
+        signals: list[Evidence],
+    ) -> Optional[tuple[Evidence, float]]:
+        """Select the latest exact DeepField forecast without inventing samples."""
+        forecasts: list[tuple[Evidence, float]] = []
+        for signal in signals:
+            if signal.source != "deepfield-fleet":
+                continue
+            metadata = signal.metadata
+            if metadata.get("producer_event_type") != _DEEPFIELD_FORECAST_EVENT_TYPE:
+                continue
+            data = metadata.get("producer_data")
+            if not isinstance(data, dict) or data.get("advisory_only") is not True:
+                continue
+            predicted_value = data.get("predicted_value")
+            confidence = data.get("confidence")
+            horizon_seconds = data.get("horizon_seconds")
+            if (
+                isinstance(predicted_value, bool)
+                or not isinstance(predicted_value, (int, float))
+                or not math.isfinite(float(predicted_value))
+                or isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))
+                or not math.isfinite(float(confidence))
+                or not 0.0 <= float(confidence) <= 1.0
+                or isinstance(horizon_seconds, bool)
+                or not isinstance(horizon_seconds, int)
+                or horizon_seconds <= 0
+            ):
+                continue
+            forecasts.append((signal, float(confidence)))
+        if not forecasts:
+            return None
+        return max(forecasts, key=lambda item: item[0].timestamp)
+
     def _select_primary_metric(self, signals: list[Evidence]) -> list[Evidence]:
         latency = [s for s in signals if s.metric == "latency_ms"]
         if len(latency) >= 3:
@@ -85,6 +139,7 @@ class HorizonPredictor:
     def _detect_spike(self, values: list[float]) -> Optional[float]:
         """Detect if values contain a spike. Returns peak value or None."""
         from gcl.config import get_settings
+
         settings = get_settings()
         mean = sum(values) / len(values)
         if mean <= 0:
@@ -115,14 +170,16 @@ class HorizonPredictor:
         decay_rate = 0.9
         points: list[TrajectoryPoint] = []
         for i in range(horizon_steps):
-            val = peak * (decay_rate ** i)
+            val = peak * (decay_rate**i)
             margin = val * 0.1
-            points.append(TrajectoryPoint(
-                step=i,
-                value=val,
-                lower=val - margin,
-                upper=val + margin,
-            ))
+            points.append(
+                TrajectoryPoint(
+                    step=i,
+                    value=val,
+                    lower=val - margin,
+                    upper=val + margin,
+                )
+            )
         confidence = min(0.85, len(values) / 10.0)
         return Trajectory(
             points=points,
@@ -138,8 +195,14 @@ class HorizonPredictor:
         for i in range(horizon_steps):
             val = forecast_value * (1.0 + i * 0.01)  # slight upward trend from forecast
             margin = val * 0.05
-            points.append(TrajectoryPoint(step=i, value=val, lower=val - margin, upper=val + margin))
-        return Trajectory(points=points, horizon_steps=horizon_steps, confidence=confidence)
+            points.append(
+                TrajectoryPoint(
+                    step=i, value=val, lower=val - margin, upper=val + margin
+                )
+            )
+        return Trajectory(
+            points=points, horizon_steps=horizon_steps, confidence=confidence
+        )
 
     def _flat_trajectory(
         self, value: float, horizon_steps: int, confidence: float

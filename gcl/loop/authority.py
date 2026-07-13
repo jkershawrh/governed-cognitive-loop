@@ -20,32 +20,67 @@ CONSEQUENCE_SCORES = {
 }
 
 
-async def check_authority(action_type: str, action_id: str) -> dict:
-    """Check with the agent-promotion-line whether this action is within authority.
+def _bounded_score(value: object, default: float) -> float:
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return default
 
-    Returns: {"verdict": "allow"|"refuse"|"route_human", "reason": "...", "ceiling": float}
-    Returns allow if the authority service is not configured or unreachable.
+
+async def collect_agent_promotion_attestation(
+    action_type: str,
+    action_id: str,
+) -> Optional[dict]:
+    """Collect optional agent-promotion provenance without gating a proposal.
+
+    fleet-llm-d owns admission and authorization. This compatibility call can
+    annotate a DecisionPackage, but every result, including refusal or service
+    unavailability, remains non-authoritative and cannot suppress submission.
     """
     settings = get_settings()
-    if not settings.authority_url:
-        return {"verdict": "allow", "reason": "authority service not configured", "ceiling": 1.0}
+    if not settings.agent_promotion_url:
+        return None
 
     consequence = CONSEQUENCE_SCORES.get(action_type, 0.5)
+    headers = {}
+    if settings.agent_promotion_bearer_token:
+        headers["Authorization"] = f"Bearer {settings.agent_promotion_bearer_token}"
 
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(
-                f"{settings.authority_url}/api/v1/authority/gate",
+            response = await client.post(
+                f"{settings.agent_promotion_url.rstrip('/')}/api/v1/authority/gate",
                 json={
-                    "agent_id": settings.authority_agent_id,
+                    "agent_id": settings.proposer_agent_id,
                     "action_id": action_id,
                     "consequence_score": consequence,
                 },
+                headers=headers,
             )
-            if resp.status_code == 200:
-                return resp.json()
-            logger.warning("Authority service returned %d", resp.status_code)
-    except (httpx.HTTPError, Exception) as e:
-        logger.debug("Authority service unavailable: %s", e)
+            if response.status_code == 200:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    verdict = str(payload.get("verdict", "unavailable")).lower()
+                    if verdict not in {"allow", "refuse", "route_human"}:
+                        verdict = "unavailable"
+                    return {
+                        "verdict": verdict,
+                        "reason": str(payload.get("reason", "")),
+                        "consequence_score": _bounded_score(
+                            payload.get("consequence_score"), consequence
+                        ),
+                        "ceiling": _bounded_score(payload.get("ceiling"), 0.0),
+                    }
+            logger.info(
+                "Optional agent-promotion service returned %d",
+                response.status_code,
+            )
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        logger.info("Optional agent-promotion service unavailable: %s", exc)
 
-    return {"verdict": "allow", "reason": "authority service unavailable, fail-open", "ceiling": 1.0}
+    return {
+        "verdict": "unavailable",
+        "reason": "optional agent-promotion attestation unavailable",
+        "consequence_score": consequence,
+        "ceiling": 0.0,
+    }

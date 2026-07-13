@@ -1,98 +1,80 @@
-# Event Flow Proof: Platform Decision Chain
+# Event flow and evidence boundary
 
-Every decision in this platform is recorded as a hash-chained entry in the ARE Immutable Ledger. This document maps the complete decision flow across the four systems and shows the proof.
+This document describes the implemented GCL producer boundary. It does not claim that the wider ecosystem runtime is assembled or that a proposal executed.
 
-## The Four Systems
+## Decision flow
 
-```
-deepfield-fleet              governed-cognitive-loop         fleet-llm-d              ARE Immutable Ledger
-(predictive brain)           (governed autonomy)             (fleet controller)       (audit backbone)
-
-Observes + classifies        Derives constraints             Evaluates policy         Stores every
-evidence from metrics,       Predicts trajectory             Accepts/refuses          decision as
-logs, images, events.        Interprets objective            intents. Assigns         hash-chained
-Produces Classification      Optimizes under constraints     placement. Routes        entries under
-Records.                     Falsifies before commit         traffic. Records         correlation IDs.
-                             Commits or rejects              decisions.               Verifies chains.
-```
-
-## Decision Flow (one governed cycle)
-
-```
+```text
 deepfield-fleet
-  ClassificationRecord (e.g. slo_breach_predicted, confidence=0.92)
+  observation and forecast evidence
+  CloudEvents 1.0 -> POST /api/v1/events/deepfield
       |
-      | POST /api/v1/classify-and-run
       v
 governed-cognitive-loop
-  [1] gcl.classify ---- derive constraints from evidence
-  [2] gcl.predict ----- forecast trajectory (linear regression + spike detection)
-  [3] gcl.interpret --- set objective (template or LLM, never an action)
-  [4] gcl.plan -------- compute action under hard constraints (numpy)
-  [5] gcl.falsify ----- challenge the plan (capacity? warmup? confidence? compliance?)
-  [6] gcl.commit ------ plan survived, commit
-      gcl.reject ------ plan failed, hold (one of these, never both)
+  [1] gcl.classify
+  [2] gcl.predict
+  [3] gcl.interpret
+  [4] gcl.plan
+  [5] gcl.falsify
+  [6] construct DecisionPackage v1
+      - constraints and evidence SHA-256 references
+      - selected candidate and rejected alternatives
+      - falsification results and confidence
+      - proposer identity and optional non-authoritative compatibility metadata
+      - expiry, correlation, causation, and idempotency
+  [7] canonical digest and signature
+  [8] gcl.decision_package.proposed
+      execution_verified=false
       |
-      | if committed: POST /api/v1/intents (HMAC-SHA256 signed token)
+      | CloudEvents 1.0 structured event
       v
-fleet-llm-d
-  [7] intent evaluated against policy (confidence >= 0.5, replicas <= max)
-  [8] fleet.placement.assigned -- cluster selected by constraint solver
-  [9] fleet.model.deployed ---- deployment created or scaled
-  [10] fleet.routing.shifted --- traffic weight updated
+fleet-llm-d /api/v2/intents
+  admission acknowledgement only
       |
       v
-ARE Immutable Ledger
-  All entries hash-chained (SHA-256) per entry_type
-  All entries correlation-linked per cycle
-  GET /api/verify confirms every chain is intact
+FleetIntent/FleetOperation -> fleet authorization -> actuation
+  external runtime behavior, not proven by this repository's unit suite
+      |
+      v
+are-immutable-ledger
+  evidence receipts and proof verification only
 ```
 
-## Ledger Entry Types
+## GCL record types
 
-### GCL entries (source: gcl)
+| Entry type | Written when | Evidence |
+|---|---|---|
+| `gcl.classify` | A cycle derives constraints | Constraint snapshot and source evidence IDs |
+| `gcl.predict` | A cycle predicts a trajectory | Points, horizon, and confidence |
+| `gcl.interpret` | A cycle constructs an objective | Terms, weights, and rationale, never an action |
+| `gcl.plan` | The deterministic controller builds candidates | Candidate steps and selected index |
+| `gcl.falsify` | The selected candidate is challenged | Verdict, reasoning, and failed check |
+| `gcl.decision_package.proposed` | A proposer endpoint accepts a signed package | Package ID, digest, accepted status, and `execution_verified=false` |
+| `gcl.decision_package.proposal_pending` | Delivery is deferred or no endpoint is configured | Package ID, digest, pending status, and `execution_verified=false` |
+| `gcl.decision_package.proposal_rejected` | The proposer endpoint rejects the package | Package ID, digest, rejection status, and `execution_verified=false` |
+| `gcl.reject` | A plan or package is rejected | Named failure and reasoning |
 
-| Entry Type | Written When | Content | Proves |
-|---|---|---|---|
-| gcl.classify | Every cycle | List of constraints with evidence IDs | Constraints derived from evidence, not stale rules |
-| gcl.predict | Every cycle | Trajectory points, confidence, horizon | System looked ahead before acting |
-| gcl.interpret | Every cycle | Objective terms, weights, rationale | Goal was set (by LLM or template), never an action |
-| gcl.plan | Every cycle | Action steps, committed_step_index=0 | Plan computed under constraints, only first step committed |
-| gcl.falsify | Every cycle | Verdict (survives/fails), failed_check, reasoning | Every plan was challenged before commit |
-| gcl.commit | When plan survives | Action type, parameters, verdict | Action was committed only after surviving falsification |
-| gcl.reject | When plan fails | Action type, failed_check, reasoning | Action was held because falsification found a flaw |
+These records demonstrate local decision sequencing. Only an `are-immutable-ledger` receipt-chain verification can establish external immutable proof. A valid receipt proves that evidence was recorded; it does not grant authority or prove actuation. The in-memory ledger used by standalone tests cannot establish external proof.
 
-### Fleet-llm-d entries (source: fleet-controller)
+## What local tests establish
 
-| Entry Type | Written When | Content | Proves |
-|---|---|---|---|
-| fleet.placement.assigned | Cluster selected | Cluster ID, pool, GPU type, score | Workload placed by constraint solver, not arbitrary |
-| fleet.model.deployed | Model deployed | Model name, cluster, replicas | Deployment recorded with provenance |
-| fleet.routing.shifted | Traffic moved | Pool, weights, reason | Traffic shift recorded with justification |
-| fleet.tenant.registered | Tenant onboarded | Tenant ID, quotas | Tenant access recorded |
+Local tests establish:
 
-## Verification
+1. The objective interpreter does not compute control actions.
+2. Candidate plans honor the deterministic constraint checks covered by the suite.
+3. A surviving candidate is encoded in the strict DecisionPackage v1 model.
+4. DeepField source identity and sink credentials are enforced in production; correlation, causation, idempotency, and evidence digests are preserved.
+5. Package canonicalization, digest, signature, expiry, and tamper checks execute.
+6. CloudEvent IDs and transport headers are deterministic.
+7. Fleet acknowledgement never sets execution verification.
+8. The core loop never calls passport or external execution-authority gates.
+9. Optional agent-promotion results are marked non-authoritative and do not suppress submission.
+10. Legacy fleet v1 HMAC submission requires an explicit non-production compatibility flag.
 
-Every chain can be verified independently:
+Local tests do not establish:
 
-```bash
-# Verify all chains are cryptographically intact
-GET /api/verify
-# Returns: {"all_valid": true, "chains": [...]}
+- fleet actuation or verified observed state;
+- immutable external `are-immutable-ledger` receipts;
+- multi-cluster, OpenShift, performance, chaos, soak, or security promotion evidence.
 
-# Query all entries for a specific cycle
-GET /api/receipts/chain?correlation_id=gcl-<uuid>
-# Returns: ordered list of entries (classify, predict, interpret, plan, falsify, commit/reject)
-
-# Query all entries from a specific source
-GET /api/entries?source_id=gcl
-GET /api/entries?source_id=fleet-controller
-```
-
-## What the Proof Shows
-
-1. **Every decision was governed.** No action committed without a full cycle (classify, predict, interpret, plan, falsify).
-2. **Every rejection has a reason.** The failed_check field names exactly what falsification caught.
-3. **The LLM never produced an action.** gcl.interpret contains only objective terms and rationale, never action types.
-4. **Hard constraints were never violated.** Every committed scale action has replicas within the capacity bound.
-5. **The receipt is immutable.** Hash chains verify that no entry was altered after writing.
+See [DecisionPackage v1](decision-package-v1.md) for the full contract.

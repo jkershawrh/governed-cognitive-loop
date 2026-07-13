@@ -73,8 +73,12 @@ class TestOutcomes:
 class TestFleetResponse:
     def test_fleet_response_tracked(self, tracker):
         tracker.record_commit("c1", "corr1", "scale", 8000.0,
-                            fleet_response={"status": "executed", "intent_id": "i1"})
-        assert tracker._recent_commits[-1].fleet_response["status"] == "executed"
+                            fleet_response={
+                                "status": "verified",
+                                "operation_id": "op1",
+                                "execution_verified": True,
+                            })
+        assert tracker._recent_commits[-1].fleet_response["status"] == "verified"
         assert tracker.pending_count() == 1
 
     def test_fleet_refused_prevents_outcome(self, tracker):
@@ -85,7 +89,7 @@ class TestFleetResponse:
     def test_fleet_deferred_tracked(self, tracker):
         tracker.record_commit("c1", "corr1", "scale", 8000.0,
                             fleet_response={"status": "deferred"})
-        assert tracker.pending_count() == 1
+        assert tracker.pending_count() == 0
 
     def test_pending_outcomes_capped(self, tracker):
         with patch("gcl.loop.accountability.get_settings") as mock:

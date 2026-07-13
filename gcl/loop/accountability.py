@@ -66,7 +66,8 @@ class AccountabilityTracker:
         return True, ""
 
     def record_commit(self, cycle_id: str, correlation_id: str, action_type: str,
-                      latency_at_commit: float, fleet_response: Optional[dict] = None):
+                      latency_at_commit: float, fleet_response: Optional[dict] = None,
+                      outcome_eligible: bool = True):
         record = CommitRecord(
             action_type=action_type,
             committed_at=time.time(),
@@ -80,13 +81,20 @@ class AccountabilityTracker:
         if len(self._recent_commits) > 100:
             self._recent_commits = self._recent_commits[-100:]
 
-        # Only track outcome if fleet accepted (or no fleet configured)
+        # Proposal acceptance is not execution. Outcome checks begin only after an
+        # externally verified outcome receipt has been supplied.
         fleet_status = ""
+        execution_verified = False
         if fleet_response and isinstance(fleet_response, dict):
             fleet_status = fleet_response.get("status", "")
+            execution_verified = fleet_response.get("execution_verified") is True
 
-        if fleet_status == "refused":
-            return  # Do not track outcome for refused intents
+        if fleet_status in ("refused", "rejected"):
+            return
+        if fleet_response is not None and not execution_verified:
+            outcome_eligible = False
+        if not outcome_eligible:
+            return
 
         metric, direction = ACTION_EXPECTATIONS.get(action_type, (None, None))
         if metric is not None:

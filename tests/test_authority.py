@@ -2,83 +2,73 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from gcl.loop.authority import check_authority, CONSEQUENCE_SCORES
+from gcl.loop.authority import CONSEQUENCE_SCORES, collect_agent_promotion_attestation
 
 
-class TestAuthorityGate:
+class TestOptionalAgentPromotionCompatibility:
     @pytest.mark.asyncio
-    async def test_allow_when_not_configured(self):
-        with patch("gcl.loop.authority.get_settings") as mock:
-            mock.return_value.authority_url = ""
-            result = await check_authority("scale", "test-id")
-        assert result["verdict"] == "allow"
+    async def test_missing_service_produces_no_attestation(self):
+        with patch("gcl.loop.authority.get_settings") as settings:
+            settings.return_value.agent_promotion_url = ""
+            result = await collect_agent_promotion_attestation("scale", "decision-1")
 
-    @pytest.mark.asyncio
-    async def test_allow_when_service_unavailable(self):
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(side_effect=Exception("timeout"))
-
-        with patch("gcl.loop.authority.get_settings") as mock_settings:
-            mock_settings.return_value.authority_url = "http://fake:8080"
-            mock_settings.return_value.authority_agent_id = "gcl"
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await check_authority("scale", "test-id")
-        assert result["verdict"] == "allow"
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_refuse_when_above_ceiling(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+    async def test_refusal_is_returned_as_metadata(self):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
             "verdict": "refuse",
-            "reason": "consequence 0.5 exceeds ceiling 0.2",
+            "reason": "above optional ceiling",
+            "consequence_score": 0.5,
             "ceiling": 0.2,
         }
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.post = AsyncMock(return_value=response)
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+        with (
+            patch("gcl.loop.authority.get_settings") as settings,
+            patch("gcl.loop.authority.httpx.AsyncClient", return_value=client),
+        ):
+            settings.return_value.agent_promotion_url = "http://promotion.test"
+            settings.return_value.agent_promotion_bearer_token = "token"
+            settings.return_value.proposer_agent_id = "gcl"
+            result = await collect_agent_promotion_attestation("scale", "decision-1")
 
-        with patch("gcl.loop.authority.get_settings") as mock_settings:
-            mock_settings.return_value.authority_url = "http://fake:8080"
-            mock_settings.return_value.authority_agent_id = "gcl"
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await check_authority("scale", "test-id")
+        assert result is not None
         assert result["verdict"] == "refuse"
-
-    @pytest.mark.asyncio
-    async def test_route_human_for_probation(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "verdict": "route_human",
-            "reason": "T0 (PROBATION): all actions route to human",
+        assert result["ceiling"] == 0.2
+        assert client.post.await_args.kwargs["headers"] == {
+            "Authorization": "Bearer token"
         }
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    @pytest.mark.asyncio
+    async def test_unavailable_service_is_non_authoritative_metadata(self):
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.post = AsyncMock(side_effect=httpx.ConnectError("offline"))
 
-        with patch("gcl.loop.authority.get_settings") as mock_settings:
-            mock_settings.return_value.authority_url = "http://fake:8080"
-            mock_settings.return_value.authority_agent_id = "gcl"
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await check_authority("scale", "test-id")
-        assert result["verdict"] == "route_human"
+        with (
+            patch("gcl.loop.authority.get_settings") as settings,
+            patch("gcl.loop.authority.httpx.AsyncClient", return_value=client),
+        ):
+            settings.return_value.agent_promotion_url = "http://promotion.test"
+            settings.return_value.agent_promotion_bearer_token = ""
+            settings.return_value.proposer_agent_id = "gcl"
+            result = await collect_agent_promotion_attestation("migrate", "decision-2")
 
-    def test_consequence_scores_defined(self):
-        for action in ["no_action", "pre_warm", "alert", "scale", "shed_load", "migrate", "rollback"]:
-            assert action in CONSEQUENCE_SCORES
+        assert result is not None
+        assert result["verdict"] == "unavailable"
+        assert result["consequence_score"] == CONSEQUENCE_SCORES["migrate"]
+
+    def test_consequence_scores_are_advisory_and_bounded(self):
         assert CONSEQUENCE_SCORES["no_action"] == 0.0
         assert CONSEQUENCE_SCORES["scale"] > CONSEQUENCE_SCORES["pre_warm"]
-        assert CONSEQUENCE_SCORES["migrate"] > CONSEQUENCE_SCORES["scale"]
-
-    def test_consequence_scores_ordered(self):
-        scores = list(CONSEQUENCE_SCORES.values())
-        assert CONSEQUENCE_SCORES["no_action"] < CONSEQUENCE_SCORES["shed_load"]
+        assert all(0.0 <= score <= 1.0 for score in CONSEQUENCE_SCORES.values())

@@ -7,6 +7,8 @@ metadata:
 data:
   GCL_FORCE_DETERMINISTIC: "1"
   GCL_CORS_ORIGINS: "*"
+  GCL_RUNTIME_MODE: "production"
+  GCL_ALLOW_LEGACY_FLEET_HMAC_DEVELOPMENT_COMPAT: "false"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -40,10 +42,38 @@ spec:
           env:
             - name: GCL_LEDGER_URL
               value: "http://ledger-gateway.sovereign-ai-lab.svc:28099"
-            - name: GCL_FLEET_URL
+            - name: GCL_LEDGER_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-identity
+                  key: ledger-token
+                  optional: true
+            - name: GCL_FLEET_INTENTS_URL
               value: "http://fleet-controller.fleet-llm-d.svc:8080"
-            - name: GCL_FLEET_TOKEN
-              value: "oberon-fleet-secret-2026"
+            - name: GCL_FLEET_INTENTS_PATH
+              value: "/api/v2/intents"
+            - name: GCL_DEEPFIELD_EVENT_SOURCE
+              value: "urn:srex:deepfield-fleet"
+            - name: GCL_DEEPFIELD_EVENT_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-identity
+                  key: deepfield-event-token
+            - name: GCL_DECISION_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-decision-signing
+                  key: active-key
+            - name: GCL_DECISION_SIGNING_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-decision-signing
+                  key: active-key-id
+            - name: GCL_FLEET_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gcl-identity
+                  key: oidc-token
             - name: DEEPFIELD_FLEET_URL
               value: "http://deepfield-fleet.fleet-llm-d.svc:8000"
             - name: GUARDIAN_URL
