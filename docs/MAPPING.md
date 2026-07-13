@@ -1,6 +1,6 @@
 # MAPPING: Story Beats to Real Cycle Data
 
-Every beat in the story arc maps to a real field in the `LoopCycle` response and a real code path in the governed-cognitive-loop service. Nothing is mocked or illustrated abstractly.
+Every beat maps to a component field or code path. Scenario and standalone data remain component evidence, not proof of live ecosystem integration.
 
 ## Layer 0: The Hook (FalsificationGate)
 
@@ -31,7 +31,7 @@ Every beat in the story arc maps to a real field in the `LoopCycle` response and
 | Confidence envelope | `TrajectoryPoint.lower`, `TrajectoryPoint.upper` | `gcl/predictor/predictor.py` lines 26-31 | HorizonPlot shaded blue area |
 | Trajectory confidence | `LoopCycle.trajectory.confidence` | `gcl/predictor/slo_seed.py:linear_regression()` | MetricCard percentage |
 | Constraint boundaries | `Constraint.bound` from `constraints_snapshot` | `gcl/classifier/rules.py` | HorizonPlot horizontal bands (red/yellow) |
-| Committed first step | `action_plan.committed_step_index == 0` | `gcl/controller/controller.py` validator | HorizonPlot green circle + "COMMITTED" |
+| Selected first step | `action_plan.committed_step_index == 0` | `gcl/controller/controller.py` validator | HorizonPlot green circle + "SELECTED" |
 | Horizon redraw on disturbance | New `trajectory.points` after spike | `gcl/predictor/predictor.py:predict()` | HorizonPlot animated pathLength redraw |
 | Receding horizon discipline | Only `committed_step_index == 0` accepted | `gcl/domain/contracts.py:committed_index_is_zero()` | Single green marker, no multi-step commit |
 
@@ -43,6 +43,6 @@ Every beat in the story arc maps to a real field in the `LoopCycle` response and
 | Controller computes action | `LoopCycle.action_plan.steps[0]` | `gcl/controller/controller.py:optimize()` | Boundary diagram right box (green) |
 | Honesty boundary | No `ActionPlan` or `ActionStep` in interpreter module | `gcl/interpreter/` (AST test) | Arrow labeled "objective only" |
 | Full ledger chain | `GET /api/v1/cycles/{id}/chain` entries | `gcl/loop/ledger.py:write_entry()` | LedgerChain vertical timeline |
-| Chain stages | `gcl.classify`, `gcl.predict`, `gcl.interpret`, `gcl.plan`, `gcl.falsify`, `gcl.commit`/`gcl.reject` | `gcl/loop/driver.py:run_cycle()` | LedgerChain entry dots |
+| Chain stages | `gcl.classify`, `gcl.predict`, `gcl.interpret`, `gcl.plan`, `gcl.falsify`, `gcl.decision_package.proposed`/`gcl.reject` | `gcl/loop/driver.py:run_cycle()` | LedgerChain entry dots |
 | Correlation ID links chain | `LoopCycle.correlation_id` matches all entries | `gcl/loop/driver.py` | LedgerChain shared correlation |
 | No optimality claim | `objective.rationale` text | `gcl/interpreter/templates.py` | Text contains no "optimal" |

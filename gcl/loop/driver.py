@@ -3,12 +3,18 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
+from gcl.adapter.proposer_adapter import ProposerAdapter
 from gcl.classifier.classifier import ConstraintClassifier
 from gcl.committer.committer import Committer
-from gcl.config import get_settings
+from gcl.config import decision_signing_key, get_settings
 from gcl.controller.controller import Controller
 from gcl.domain.contracts import ActionPlan, ActionStep, Evidence, FalsificationResult, LoopCycle
 from gcl.domain.enums import Verdict
+from gcl.domain.decision_package import (
+    ACTION_CLASS_NAMES,
+    ProposerIdentity,
+    build_decision_package,
+)
 from gcl.falsification.gate import FalsificationGate
 from gcl.interpreter.interpreter import ObjectiveInterpreter
 from gcl.loop.accountability import AccountabilityTracker
@@ -36,7 +42,7 @@ class LoopDriver:
         self._gate = gate or FalsificationGate()
         self._committer = committer or Committer()
         self._ledger = ledger or LedgerClient()
-        self._adapter = adapter
+        self._adapter = adapter or ProposerAdapter()
         self._accountability = accountability or AccountabilityTracker()
 
     async def run_cycle(self, signals: list[Evidence]) -> LoopCycle:
@@ -114,6 +120,40 @@ class LoopDriver:
 
         committed_step = action_plan.steps[action_plan.committed_step_index]
 
+        if committed_step.action_type == "no_action":
+            await self._ledger.write_entry(
+                "gcl.no_action",
+                {"reason": "controller selected no consequential fleet action"},
+                correlation_id,
+            )
+            return LoopCycle(
+                constraints_snapshot=constraints,
+                trajectory=trajectory,
+                objective=objective,
+                action_plan=action_plan,
+                falsification=None,
+                committed=False,
+                correlation_id=correlation_id,
+            )
+        if committed_step.action_type not in ACTION_CLASS_NAMES:
+            await self._ledger.write_entry(
+                "gcl.reject",
+                {
+                    "action_type": committed_step.action_type,
+                    "reason": "action does not map to a canonical ARE fleet action class",
+                },
+                correlation_id,
+            )
+            return LoopCycle(
+                constraints_snapshot=constraints,
+                trajectory=trajectory,
+                objective=objective,
+                action_plan=action_plan,
+                falsification=None,
+                committed=False,
+                correlation_id=correlation_id,
+            )
+
         # Check cooldown before committing
         can_commit, cooldown_reason = self._accountability.can_commit(committed_step.action_type)
         if not can_commit:
@@ -149,7 +189,7 @@ class LoopDriver:
         # Passport verification: check scope with ARE Foundation
         from gcl.loop.passport import verify_passport
         passport = await verify_passport(committed_step.action_type)
-        if passport.get("decision") == "DENY":
+        if passport.get("decision") != "ALLOW":
             await self._ledger.write_entry(
                 "gcl.passport_denied",
                 {
@@ -172,7 +212,7 @@ class LoopDriver:
         # Authority gate: check with agent-promotion-line
         from gcl.loop.authority import check_authority
         authority = await check_authority(committed_step.action_type, correlation_id)
-        if authority.get("verdict") == "refuse":
+        if authority.get("verdict") != "allow":
             await self._ledger.write_entry(
                 "gcl.authority_refused",
                 {
@@ -202,8 +242,61 @@ class LoopDriver:
             correlation_id,
         )
 
+        decision_package = None
+        if falsification.verdict == Verdict.SURVIVES:
+            try:
+                decision_package = build_decision_package(
+                    constraints=constraints,
+                    action_plan=action_plan,
+                    trajectory=trajectory,
+                    falsification=falsification,
+                    evidence=signals,
+                    correlation_id=correlation_id,
+                    passport_decision=passport,
+                    authority_decision=authority,
+                    proposer=ProposerIdentity(
+                        agent_id=settings.authority_agent_id,
+                        workload_identity=settings.proposer_workload_identity,
+                        trust_domain=settings.proposer_trust_domain,
+                    ),
+                    passport_id=(
+                        settings.passport_id
+                        or str(passport.get("passport_id", "standalone-test"))
+                    ),
+                    tenant=settings.default_tenant,
+                    zone=settings.default_zone,
+                    ttl_seconds=settings.decision_package_ttl_seconds,
+                    signing_key=decision_signing_key(settings),
+                    signing_key_id=settings.decision_signing_key_id,
+                )
+            except ValueError as exc:
+                await self._ledger.write_entry(
+                    "gcl.decision_package_rejected",
+                    {
+                        "action_type": committed_step.action_type,
+                        "reason": str(exc),
+                        "execution_verified": False,
+                    },
+                    correlation_id,
+                )
+                return LoopCycle(
+                    constraints_snapshot=constraints,
+                    trajectory=trajectory,
+                    objective=objective,
+                    action_plan=action_plan,
+                    falsification=falsification,
+                    committed=False,
+                    correlation_id=correlation_id,
+                    execution_verified=False,
+                )
+
         commit_result = await self._committer.commit(
-            committed_step, falsification, self._adapter, self._ledger, correlation_id,
+            committed_step,
+            falsification,
+            self._adapter,
+            self._ledger,
+            correlation_id,
+            decision_package=decision_package,
         )
 
         did_commit = commit_result["committed"]
@@ -224,18 +317,8 @@ class LoopDriver:
                 action_type=committed_step.action_type,
                 latency_at_commit=latency_at_commit,
                 fleet_response=fleet_response,
+                outcome_eligible=False,
             )
-
-            if committed_step.action_type in ("scale", "pre_warm"):
-                actuation = await self._accountability.verify_actuation(
-                    settings.fleet_url, settings.fleet_token,
-                    committed_step.action_type, committed_step.parameters,
-                )
-                await self._ledger.write_entry(
-                    "gcl.actuation_verified",
-                    actuation,
-                    correlation_id,
-                )
 
         return LoopCycle(
             constraints_snapshot=constraints,
@@ -245,5 +328,8 @@ class LoopDriver:
             falsification=falsification,
             committed=did_commit,
             fleet_response=fleet_response,
+            proposal_response=commit_result["proposal_response"],
+            decision_package_digest=commit_result["decision_package_digest"],
+            execution_verified=False,
             correlation_id=correlation_id,
         )

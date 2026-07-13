@@ -13,8 +13,18 @@ class TestPassportVerification:
         with patch("gcl.loop.passport.get_settings") as mock:
             mock.return_value.passport_url = ""
             mock.return_value.passport_id = ""
+            mock.return_value.runtime_mode = "standalone-test"
             result = await verify_passport("scale")
         assert result["decision"] == "ALLOW"
+
+    @pytest.mark.asyncio
+    async def test_deny_when_not_configured_in_production(self):
+        with patch("gcl.loop.passport.get_settings") as mock:
+            mock.return_value.passport_url = ""
+            mock.return_value.passport_id = ""
+            mock.return_value.runtime_mode = "production"
+            result = await verify_passport("scale")
+        assert result["decision"] == "DENY"
 
     @pytest.mark.asyncio
     async def test_passport_allow_when_scoped(self):
@@ -34,6 +44,7 @@ class TestPassportVerification:
             mock_settings.return_value.passport_url = "http://fake:8443"
             mock_settings.return_value.passport_id = "passport-123"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await verify_passport("scale")
         assert result["decision"] == "ALLOW"
@@ -56,6 +67,7 @@ class TestPassportVerification:
             mock_settings.return_value.passport_url = "http://fake:8443"
             mock_settings.return_value.passport_id = "passport-123"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await verify_passport("migrate")
         assert result["decision"] == "DENY"
@@ -71,11 +83,37 @@ class TestPassportVerification:
             mock_settings.return_value.passport_url = "http://fake:8443"
             mock_settings.return_value.passport_id = "passport-123"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "standalone-test"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await verify_passport("scale")
         assert result["decision"] == "ALLOW"
 
+    @pytest.mark.asyncio
+    async def test_passport_unavailable_fails_closed_in_production(self):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=Exception("timeout"))
+
+        with patch("gcl.loop.passport.get_settings") as mock_settings:
+            mock_settings.return_value.passport_url = "http://fake:8443"
+            mock_settings.return_value.passport_id = "passport-123"
+            mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await verify_passport("scale")
+        assert result["decision"] == "DENY"
+        assert "fail-closed" in result["reason"]
+
     def test_all_action_types_have_scopes(self):
-        for action in ["no_action", "pre_warm", "scale", "shed_load", "alert", "migrate", "rollback"]:
+        for action in [
+            "deploy",
+            "scale",
+            "route",
+            "pre_warm",
+            "shed_load",
+            "migrate",
+            "kv_transfer",
+        ]:
             assert action in ACTION_SCOPES
             assert ACTION_SCOPES[action].startswith("fleet.")

@@ -226,7 +226,12 @@ class TestChainProvenance:
         assert "gcl.predict" in entry_types
         assert "gcl.interpret" in entry_types
         assert "gcl.plan" in entry_types
-        assert "gcl.commit" in entry_types or "gcl.reject" in entry_types
+        has_decision_package = any(
+            entry_type.startswith("gcl.decision_package.proposal_")
+            or entry_type == "gcl.decision_package.proposed"
+            for entry_type in entry_types
+        )
+        assert has_decision_package or "gcl.reject" in entry_types
 
 
 class TestClassificationInputFidelity:
@@ -565,7 +570,10 @@ class TestFleetResponseAccountability:
         from gcl.loop.accountability import AccountabilityTracker
         tracker = AccountabilityTracker()
         tracker.record_commit("c1", "corr1", "scale", 8000.0,
-                            fleet_response={"status": "executed"})
+                            fleet_response={
+                                "status": "verified",
+                                "execution_verified": True,
+                            })
         assert tracker.pending_count() == 1
 
 

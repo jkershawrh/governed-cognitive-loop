@@ -10,13 +10,13 @@ from gcl.config import get_settings
 logger = logging.getLogger(__name__)
 
 ACTION_SCOPES = {
-    "no_action": "fleet.observe",
-    "pre_warm": "fleet.pre_warm",
+    "pre_warm": "fleet.prewarm",
     "scale": "fleet.scale",
     "shed_load": "fleet.shed_load",
-    "alert": "fleet.alert",
     "migrate": "fleet.migrate",
-    "rollback": "fleet.rollback",
+    "deploy": "fleet.deploy",
+    "route": "fleet.route",
+    "kv_transfer": "fleet.kv_transfer",
 }
 
 
@@ -24,11 +24,22 @@ async def verify_passport(action_type: str, resource: str = "fleet-llm-d/*") -> 
     """Verify the GCL's passport scope covers the proposed action.
 
     Returns: {"decision": "ALLOW"|"DENY", "reason": "...", ...}
-    Returns ALLOW if the passport service is not configured or unreachable.
+    Only the explicit standalone-test runtime may bypass an unavailable service.
     """
     settings = get_settings()
     if not settings.passport_url or not settings.passport_id:
-        return {"decision": "ALLOW", "reason": "passport service not configured"}
+        if settings.runtime_mode == "standalone-test":
+            return {
+                "decision": "ALLOW",
+                "reason": "explicit standalone-test passport bypass",
+                "passport_status": "TEST_ONLY",
+                "passport_id": "standalone-test",
+            }
+        return {
+            "decision": "DENY",
+            "reason": "passport service or passport id is not configured",
+            "passport_status": "UNAVAILABLE",
+        }
 
     action_class = ACTION_SCOPES.get(action_type, f"fleet.{action_type}")
 
@@ -51,4 +62,15 @@ async def verify_passport(action_type: str, resource: str = "fleet-llm-d/*") -> 
     except (httpx.HTTPError, Exception) as e:
         logger.debug("Passport service unavailable: %s", e)
 
-    return {"decision": "ALLOW", "reason": "passport service unavailable, fail-open"}
+    if settings.runtime_mode == "standalone-test":
+        return {
+            "decision": "ALLOW",
+            "reason": "explicit standalone-test passport bypass after service failure",
+            "passport_status": "TEST_ONLY",
+            "passport_id": settings.passport_id,
+        }
+    return {
+        "decision": "DENY",
+        "reason": "passport service unavailable, fail-closed",
+        "passport_status": "UNAVAILABLE",
+    }

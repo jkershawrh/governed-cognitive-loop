@@ -1,5 +1,7 @@
 # Live Inference Benchmarks: Governed Cognitive Loop
 
+> Historical environment observation only. This document predates DecisionPackage v1 and is not current evidence of the governed proposer, ARE authorization, FleetOperation, or verified outcome chain.
+
 **Date:** July 10, 2026
 **Model:** granite-3.2-sovereign (IBM Granite 3.2 2B, OpenVINO format)
 **Engine:** OpenVINO Model Server (OVMS) 2026.2.1

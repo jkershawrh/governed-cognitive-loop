@@ -12,6 +12,7 @@ from gcl.adapter.intent_mapping import (
     map_action_to_intent,
 )
 from gcl.domain.contracts import ActionStep
+from gcl.config import get_settings
 
 
 def _scale_step(replicas=5, pool="default"):
@@ -137,12 +138,12 @@ class TestIntentMapping:
 
 class TestFleetAdapter:
     @pytest.mark.asyncio
-    async def test_actuate_scale_no_url(self):
+    async def test_legacy_actuation_disabled_by_default(self):
         adapter = FleetAdapter(url="")
         result = await adapter.actuate(_scale_step(5), "corr-1")
         assert result is not None
-        assert result["type"] == "scale"
-        assert result["desired_replicas"] == 5
+        assert result["status"] == "disabled"
+        assert result["execution_verified"] is False
 
     @pytest.mark.asyncio
     async def test_actuate_no_action_returns_none(self):
@@ -151,9 +152,17 @@ class TestFleetAdapter:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_actuate_prewarm(self):
+    async def test_development_compat_is_explicit(self, monkeypatch):
+        monkeypatch.setenv("GCL_RUNTIME_MODE", "development")
+        monkeypatch.setenv(
+            "GCL_ALLOW_LEGACY_FLEET_HMAC_DEVELOPMENT_COMPAT",
+            "true",
+        )
+        get_settings.cache_clear()
         adapter = FleetAdapter(url="")
         result = await adapter.actuate(_prewarm_step(target=6), "corr-3")
         assert result is not None
-        assert result["type"] == "pre_warm"
-        assert result["target_replicas"] == 6
+        assert result["status"] == "not_sent"
+        assert result["legacy_intent"]["type"] == "pre_warm"
+        assert result["legacy_intent"]["target_replicas"] == 6
+        assert result["execution_verified"] is False

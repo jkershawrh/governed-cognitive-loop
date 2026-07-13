@@ -34,6 +34,12 @@ def _generate_fleet_token(secret: str, subject: str = "governed-cognitive-loop")
 
 
 class FleetAdapter:
+    """Development-only compatibility adapter for the legacy fleet v1 API.
+
+    Ordinary GCL decisions use ProposerAdapter and signed DecisionPackage events.
+    This adapter is retained for one explicit local compatibility mode only.
+    """
+
     def __init__(self, url: Optional[str] = None, token: Optional[str] = None):
         settings = get_settings()
         self._url = url or settings.fleet_url
@@ -47,9 +53,28 @@ class FleetAdapter:
         if intent is None:
             return None
 
+        settings = get_settings()
+        if (
+            settings.runtime_mode == "production"
+            or not settings.allow_legacy_fleet_hmac_development_compat
+        ):
+            return {
+                "status": "disabled",
+                "reason": (
+                    "legacy fleet v1 HMAC compatibility requires "
+                    "GCL_ALLOW_LEGACY_FLEET_HMAC_DEVELOPMENT_COMPAT=true "
+                    "outside production"
+                ),
+                "execution_verified": False,
+            }
+
         if not self._url:
-            logger.info("Fleet URL not configured, skipping actuation: %s", intent.type)
-            return intent.model_dump()
+            logger.info("Fleet URL not configured, skipping legacy submission: %s", intent.type)
+            return {
+                "status": "not_sent",
+                "legacy_intent": intent.model_dump(),
+                "execution_verified": False,
+            }
 
         headers = {}
         if self._secret:
@@ -63,7 +88,18 @@ class FleetAdapter:
                     headers=headers,
                 )
                 response.raise_for_status()
-                return response.json()
+                payload = response.json()
+                return {
+                    "status": "accepted",
+                    "remote_response": payload,
+                    "transport": "legacy-development-compat",
+                    "execution_verified": False,
+                }
         except (httpx.HTTPError, Exception) as e:
-            logger.warning("Fleet actuation failed: %s", e)
-            return intent.model_dump()
+            logger.warning("Legacy fleet submission failed: %s", e)
+            return {
+                "status": "deferred",
+                "reason": str(e),
+                "legacy_intent": intent.model_dump(),
+                "execution_verified": False,
+            }

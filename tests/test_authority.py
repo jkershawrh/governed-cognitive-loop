@@ -12,8 +12,17 @@ class TestAuthorityGate:
     async def test_allow_when_not_configured(self):
         with patch("gcl.loop.authority.get_settings") as mock:
             mock.return_value.authority_url = ""
+            mock.return_value.runtime_mode = "standalone-test"
             result = await check_authority("scale", "test-id")
         assert result["verdict"] == "allow"
+
+    @pytest.mark.asyncio
+    async def test_refuse_when_not_configured_in_production(self):
+        with patch("gcl.loop.authority.get_settings") as mock:
+            mock.return_value.authority_url = ""
+            mock.return_value.runtime_mode = "production"
+            result = await check_authority("scale", "test-id")
+        assert result["verdict"] == "refuse"
 
     @pytest.mark.asyncio
     async def test_allow_when_service_unavailable(self):
@@ -25,9 +34,26 @@ class TestAuthorityGate:
         with patch("gcl.loop.authority.get_settings") as mock_settings:
             mock_settings.return_value.authority_url = "http://fake:8080"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "standalone-test"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await check_authority("scale", "test-id")
         assert result["verdict"] == "allow"
+
+    @pytest.mark.asyncio
+    async def test_refuse_when_service_unavailable_in_production(self):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=Exception("timeout"))
+
+        with patch("gcl.loop.authority.get_settings") as mock_settings:
+            mock_settings.return_value.authority_url = "http://fake:8080"
+            mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await check_authority("scale", "test-id")
+        assert result["verdict"] == "refuse"
+        assert "fail-closed" in result["reason"]
 
     @pytest.mark.asyncio
     async def test_refuse_when_above_ceiling(self):
@@ -47,6 +73,7 @@ class TestAuthorityGate:
         with patch("gcl.loop.authority.get_settings") as mock_settings:
             mock_settings.return_value.authority_url = "http://fake:8080"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await check_authority("scale", "test-id")
         assert result["verdict"] == "refuse"
@@ -68,6 +95,7 @@ class TestAuthorityGate:
         with patch("gcl.loop.authority.get_settings") as mock_settings:
             mock_settings.return_value.authority_url = "http://fake:8080"
             mock_settings.return_value.authority_agent_id = "gcl"
+            mock_settings.return_value.runtime_mode = "production"
             with patch("httpx.AsyncClient", return_value=mock_client):
                 result = await check_authority("scale", "test-id")
         assert result["verdict"] == "route_human"

@@ -2,18 +2,12 @@
 
 ## Platform Overview
 
-Four systems compose the governed inference fleet platform:
+GCL is one decision producer in the wider governed inference fleet platform:
 
 ```
-deepfield-fleet              governed-cognitive-loop         fleet-llm-d              ARE Immutable Ledger
-(predictive brain)           (governed autonomy)             (fleet controller)       (audit backbone)
-
-Observes + classifies        Derives constraints             Evaluates policy         Stores every
-evidence from metrics,       Predicts trajectory             Accepts/refuses          decision as
-logs, images, events.        Interprets objective            intents. Assigns         hash-chained
-Produces Classification      Optimizes under constraints     placement. Routes        entries under
-Records.                     Falsifies before commit         traffic. Records         correlation IDs.
-                             Commits or rejects              decisions.               Verifies chains.
+rev_deepfield -> GCL -> agent-promotion -> governance-strata -> ARE -> fleet-llm-d
+ observations    signed       proposer          transaction      grant    actuation
+ and forecasts   package      ceiling           lifecycle        receipt
 ```
 
 ## GCL Components
@@ -25,14 +19,15 @@ Records.                     Falsifies before commit         traffic. Records   
 | ObjectiveInterpreter | Context to ObjectiveSpec (cost terms, weights, rationale) | Primary (with template fallback) |
 | Controller | Trajectory + objective + constraints to ActionPlan (numpy, deterministic) | None |
 | FalsificationGate | Pre-commit disconfirmation (7 checks + optional LLM adversary) | Optional probe |
-| Committer | Actuate or reject, record to ledger | None |
+| Committer | Commit a signed decision package, propose or reject, record the decision | None |
 | LoopDriver | Orchestrates the full cycle, advances receding horizon | None |
 
 Supporting adapters:
 | Adapter | Purpose |
 |---|---|
 | ClassificationAdapter | Transforms deepfield-fleet ClassificationRecords to Evidence |
-| FleetAdapter | Maps committed actions to fleet-llm-d intents (HMAC-SHA256 auth) |
+| ProposerAdapter | Publishes signed DecisionPackage CloudEvents to proposer authority |
+| FleetAdapter | Disabled production compatibility adapter for legacy v1 HMAC submission |
 | IntentMapping | ScaleIntent, PreWarmIntent, ShedLoadIntent, AlertIntent, MigrateIntent |
 
 ## The Honesty Boundary
@@ -53,20 +48,20 @@ Evidence arrives (Prometheus, Kubernetes, classification)
 [3] gcl.interpret --- objective set (LLM or template, never an action)
 [4] gcl.plan -------- action computed under hard constraints
 [5] gcl.falsify ----- plan challenged (7 deterministic checks)
-[6] gcl.commit ------ survived, committed
+[6] sign package ---- survived, expiry-bounded decision package
     gcl.reject ------ failed, held with reason
       |
-[7] POST /api/v1/intents (HMAC-SHA256 auth)
+[7] gcl.decision_package.proposed (execution_verified=false)
       |
-[8] fleet-llm-d evaluates against policy
-[9] fleet.placement.assigned / fleet.model.deployed / fleet.routing.shifted
+[8] CloudEvent 1.0 to proposer authority
+[9] governance-strata and ARE may authorize a FleetIntent/FleetOperation
       |
-[10] ARE Ledger: all entries hash-chained per type, correlation-linked per cycle
+[10] fleet-llm-d may reconcile an authorized operation
 ```
 
 ## Receding Horizon
 
-The controller computes actions over the full horizon but marks only the first step as committed (committed_step_index is enforced to 0 by a Pydantic validator). After committing (or rejecting), the loop re-measures and re-plans from fresh data.
+The controller computes candidates over the full horizon but selects only the first step (`committed_step_index` is enforced to 0 by a Pydantic validator). Committing that decision means signing and proposing a package. It does not mean infrastructure execution.
 
 ## Falsification Checks
 
@@ -82,10 +77,12 @@ The controller computes actions over the full horizon but marks only the first s
 
 ## Multi-Cluster and ModelPlane
 
-The GCL integrates with fleet-llm-d's ModelPlane system for multi-cluster awareness. The ModelPlane mock provides cluster state (edge-east, edge-west, sovereign-eu, dev-cluster-1-cpu). Evidence carries cluster labels (`labels={"cluster": "edge-east"}`) so ledger entries trace which cluster each decision targets.
+GCL can consume multi-cluster observations. Mock cluster state is test input only and is not live ModelPlane evidence. Evidence labels can identify a cluster so a decision package preserves its source scope.
 
-When compliance + capacity exhaustion occur together, the controller produces a `migrate` action instead of just an `alert`, triggering cross-cluster workload relocation.
+When compliance and capacity exhaustion occur together, the controller can propose a `migrate` candidate. Only an authorized fleet operation can trigger relocation.
 
 ## Ledger Chain
 
-Each cycle writes a chain under one correlation ID: classified constraints, predicted trajectory, interpreted objective, proposed action, falsification result, and commit/reject outcome. Every entry is hash-chained (SHA-256) per entry type and can be verified via `GET /api/verify`.
+Each cycle writes correlated decision entries through the configured ledger client. The signed package carries content and evidence digests. ARE remains the authority for immutable receipt-chain truth. In-memory test ledger entries are not external ARE evidence.
+
+See [DecisionPackage v1](decision-package-v1.md) for the exact producer contract and security modes.

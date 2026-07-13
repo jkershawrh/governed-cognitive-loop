@@ -98,7 +98,11 @@ class TestLoopDriver:
 
         entry_types = [e["entry_type"] for e in entries]
         has_reject = "gcl.reject" in entry_types
-        has_commit = "gcl.commit" in entry_types
+        has_commit = any(
+            entry_type.startswith("gcl.decision_package.proposal_")
+            or entry_type == "gcl.decision_package.proposed"
+            for entry_type in entry_types
+        )
         assert has_reject or has_commit
 
     @pytest.mark.asyncio

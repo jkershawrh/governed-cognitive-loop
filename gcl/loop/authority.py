@@ -24,11 +24,23 @@ async def check_authority(action_type: str, action_id: str) -> dict:
     """Check with the agent-promotion-line whether this action is within authority.
 
     Returns: {"verdict": "allow"|"refuse"|"route_human", "reason": "...", "ceiling": float}
-    Returns allow if the authority service is not configured or unreachable.
+    Only the explicit standalone-test runtime may bypass an unavailable service.
     """
     settings = get_settings()
     if not settings.authority_url:
-        return {"verdict": "allow", "reason": "authority service not configured", "ceiling": 1.0}
+        if settings.runtime_mode == "standalone-test":
+            return {
+                "verdict": "allow",
+                "reason": "explicit standalone-test authority bypass",
+                "ceiling": 1.0,
+                "consequence_score": CONSEQUENCE_SCORES.get(action_type, 0.5),
+            }
+        return {
+            "verdict": "refuse",
+            "reason": "authority service is not configured",
+            "ceiling": 0.0,
+            "consequence_score": CONSEQUENCE_SCORES.get(action_type, 0.5),
+        }
 
     consequence = CONSEQUENCE_SCORES.get(action_type, 0.5)
 
@@ -48,4 +60,16 @@ async def check_authority(action_type: str, action_id: str) -> dict:
     except (httpx.HTTPError, Exception) as e:
         logger.debug("Authority service unavailable: %s", e)
 
-    return {"verdict": "allow", "reason": "authority service unavailable, fail-open", "ceiling": 1.0}
+    if settings.runtime_mode == "standalone-test":
+        return {
+            "verdict": "allow",
+            "reason": "explicit standalone-test authority bypass after service failure",
+            "ceiling": 1.0,
+            "consequence_score": consequence,
+        }
+    return {
+        "verdict": "refuse",
+        "reason": "authority service unavailable, fail-closed",
+        "ceiling": 0.0,
+        "consequence_score": consequence,
+    }

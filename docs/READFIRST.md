@@ -1,31 +1,28 @@
-# READFIRST: Findings and Assumptions
+# READFIRST: current boundaries and assumptions
 
-## deepfield-fleet
+## Ecosystem owners
 
-Sibling project providing fleet management with microagents, intents, and macroagents.
+- `rev_deepfield` owns observations, findings, and forecasts.
+- GCL owns decision synthesis, alternatives, falsification, and `DecisionPackage`.
+- agent-promotion owns proposer autonomy ceilings.
+- governance-strata owns transaction lifecycle.
+- ARE owns execution authorization and immutable receipt truth.
+- fleet-llm-d owns authorized fleet desired, observed, and operation state.
 
-Key components to interface with:
-- `app/microagents/slo_forecaster.py`: Linear regression on latency metrics with R-squared confidence. Reuse the algorithm pattern for HorizonPredictor.
-- `app/domain/fleet_intents.py`: `PreWarmIntent`, `ScaleIntent`, `ShedLoadIntent` inherit from `FleetIntent`. The FleetAdapter must produce structurally compatible intents.
-- `app/intents/emitter.py`: Sends intents to fleet-llm-d at `/api/v1/intents` via httpx.
-- `app/macroagents/consequence_scoper.py`: Reference for how scoping and evidence evaluation work.
-- `app/inference/client.py`: `infer()` returns `Optional[InferenceResult]`, returns `None` when unconfigured. `set_force_rules(True)` globally disables LLM. Replicate this pattern.
+Producer repositories own their schemas. This repository therefore exports its versioned DecisionPackage and CloudEvent schemas and does not redefine downstream execution or ledger contracts.
 
-## are-immutable-ledger
+## Implemented integration boundary
 
-Immutable audit ledger service (gRPC with REST gateway).
+GCL publishes a signed, expiry-bounded `DecisionPackage` as a structured CloudEvents 1.0 event to the configured proposer endpoint. An acknowledgement means proposal transport only. It never means verified execution.
 
-REST API contract:
-- `POST /api/entries` with `{entry_type, agent_id, content, content_type, source_id, correlation_id}`, returns `{entry_id, entry_hash, chain_position, written_ts}`
-- `GET /api/receipts/chain?correlation_id=X` for trust chain queries
-
-## Integration strategy
-
-This project has zero import-time dependencies on either sibling. Communication is over HTTP. Local copies of compatible Pydantic models are maintained. In-memory fallbacks when services are unavailable.
+The legacy fleet `/api/v1/intents` HMAC adapter is disabled by default, always disabled in production, and available only behind an explicitly named development compatibility flag.
 
 ## Assumptions
 
-1. LLM endpoint follows OpenAI-compatible chat completions API.
-2. Ledger REST gateway is at the URL configured in `GCL_LEDGER_URL`.
-3. Fleet endpoint is at the URL configured in `GCL_FLEET_URL`.
-4. All three external services are optional at development time (skip flags and fallbacks).
+1. The optional LLM endpoint follows an OpenAI-compatible chat completions API.
+2. Production passport and authority services are configured and reachable. GCL fails closed if either check cannot authorize the proposal.
+3. `GCL_DECISION_SIGNING_KEY` is delivered by external secret management and contains at least 32 bytes.
+4. Tests deliberately set `GCL_RUNTIME_MODE=standalone-test`; that mode is never a production configuration.
+5. Local in-memory ledger records and mocked proposer responses are component evidence only.
+
+See [DecisionPackage v1](decision-package-v1.md) and [Event flow and evidence boundary](event-flow-proof.md).

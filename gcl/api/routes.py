@@ -8,6 +8,10 @@ from pydantic import BaseModel
 from gcl.adapter.classification_adapter import batch_classifications_to_evidence
 from gcl.api.schemas import ChainEntry, CycleRequest, CycleResponse
 from gcl.domain.contracts import Evidence, LoopCycle
+from gcl.domain.decision_package import (
+    decision_package_cloud_event_schema,
+    decision_package_schema,
+)
 from gcl.loop.driver import LoopDriver
 from gcl.loop.ledger import LedgerClient
 from gcl.scenario.engine import (
@@ -21,6 +25,13 @@ router = APIRouter(prefix="/api/v1")
 _ledger = LedgerClient()
 _driver = LoopDriver(ledger=_ledger)
 _cycles: dict[str, LoopCycle] = {}
+
+
+def _proposal_status(cycle: LoopCycle) -> str | None:
+    if not cycle.proposal_response:
+        return None
+    value = cycle.proposal_response.get("status")
+    return str(value) if value is not None else None
 
 
 def get_driver() -> LoopDriver:
@@ -54,6 +65,9 @@ async def run_cycle(request: CycleRequest) -> CycleResponse:
         cycle_id=str(cycle.cycle_id),
         correlation_id=cycle.correlation_id,
         committed=cycle.committed,
+        execution_verified=cycle.execution_verified,
+        proposal_status=_proposal_status(cycle),
+        decision_package_digest=cycle.decision_package_digest,
         action_type=action_type,
         falsification_verdict=verdict,
     )
@@ -106,10 +120,23 @@ async def list_cycles() -> list[CycleResponse]:
             cycle_id=str(cycle.cycle_id),
             correlation_id=cycle.correlation_id,
             committed=cycle.committed,
+            execution_verified=cycle.execution_verified,
+            proposal_status=_proposal_status(cycle),
+            decision_package_digest=cycle.decision_package_digest,
             action_type=action_type,
             falsification_verdict=verdict,
         ))
     return results
+
+
+@router.get("/contracts/decision-package-v1/schema")
+async def get_decision_package_schema() -> dict:
+    return decision_package_schema()
+
+
+@router.get("/contracts/decision-package-cloudevent-v1/schema")
+async def get_decision_package_cloud_event_schema() -> dict:
+    return decision_package_cloud_event_schema()
 
 
 @router.post("/reset")
@@ -167,6 +194,15 @@ async def modelplane_status() -> dict:
     settings = get_settings()
     headers: dict[str, str] = {}
     if settings.fleet_token:
+        if (
+            settings.runtime_mode == "production"
+            or not settings.allow_legacy_fleet_hmac_development_compat
+        ):
+            return {
+                "clusters": [],
+                "deployments": [],
+                "error": "legacy fleet HMAC compatibility is disabled",
+            }
         headers["Authorization"] = f"Bearer {_generate_fleet_token(settings.fleet_token)}"
 
     result: dict = {"clusters": [], "deployments": []}
@@ -220,6 +256,9 @@ async def cycle_from_metrics() -> CycleResponse:
         cycle_id=str(cycle.cycle_id),
         correlation_id=cycle.correlation_id,
         committed=cycle.committed,
+        execution_verified=cycle.execution_verified,
+        proposal_status=_proposal_status(cycle),
+        decision_package_digest=cycle.decision_package_digest,
         action_type=action_type,
         falsification_verdict=verdict,
     )
@@ -261,6 +300,9 @@ async def classify_and_run(request: ClassificationCycleRequest) -> CycleResponse
         cycle_id=str(cycle.cycle_id),
         correlation_id=cycle.correlation_id,
         committed=cycle.committed,
+        execution_verified=cycle.execution_verified,
+        proposal_status=_proposal_status(cycle),
+        decision_package_digest=cycle.decision_package_digest,
         action_type=action_type,
         falsification_verdict=verdict,
     )
