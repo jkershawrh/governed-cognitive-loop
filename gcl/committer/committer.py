@@ -45,8 +45,10 @@ class Committer:
                 "execution_verified": False,
             }
             propose = getattr(adapter, "propose", None) if adapter is not None else None
-            if propose is not None and inspect.iscoroutinefunction(propose):
-                result = await propose(decision_package)
+            if propose is not None and callable(propose):
+                result = propose(decision_package)
+                if inspect.isawaitable(result):
+                    result = await result
                 if hasattr(result, "model_dump"):
                     proposal_response = result.model_dump(mode="json")
                 elif isinstance(result, dict):
