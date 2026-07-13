@@ -146,6 +146,29 @@ class LoopDriver:
                 correlation_id=correlation_id,
             )
 
+        # Passport verification: check scope with ARE Foundation
+        from gcl.loop.passport import verify_passport
+        passport = await verify_passport(committed_step.action_type)
+        if passport.get("decision") == "DENY":
+            await self._ledger.write_entry(
+                "gcl.passport_denied",
+                {
+                    "action_type": committed_step.action_type,
+                    "reason": passport.get("reason", ""),
+                    "passport_status": passport.get("passport_status", ""),
+                },
+                correlation_id,
+            )
+            return LoopCycle(
+                constraints_snapshot=constraints,
+                trajectory=trajectory,
+                objective=objective,
+                action_plan=action_plan,
+                falsification=None,
+                committed=False,
+                correlation_id=correlation_id,
+            )
+
         # Authority gate: check with agent-promotion-line
         from gcl.loop.authority import check_authority
         authority = await check_authority(committed_step.action_type, correlation_id)

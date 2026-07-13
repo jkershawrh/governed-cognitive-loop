@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     fleet_token: str = ""
     authority_url: str = ""
     authority_agent_id: str = "governed-cognitive-loop"
+    passport_url: str = ""
+    passport_id: str = ""
     force_deterministic: bool = False
 
     model_config = {"env_prefix": "GCL_"}
