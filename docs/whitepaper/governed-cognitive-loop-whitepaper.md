@@ -298,6 +298,74 @@ Historical experiments used direct HMAC fleet intent submission. That evidence a
 
 Zero pod restarts on the GCL application overnight. The fleet-controller had one OOMKill at 256Mi memory limit (bumped to 512Mi, resolved). No other stability issues observed during the production validation window.
 
+### 8.7 Ecosystem Stress Tests (July 2026)
+
+An 8-phase stress test exercised the full 4-system platform on Oberon: smoke, performance baseline, pressure, edge cases, degradation, soak, pen testing, and chaos. GCL ran as a single pod on OpenShift with sslip.io TLS termination. Fleet controller ran locally. Overall result: 42/48 passed (87.5%).
+
+**Performance baseline (n=100 sequential governance cycles):**
+
+| Metric | Value |
+|---|---|
+| p50 | 560ms |
+| p95 | 860ms |
+| p99 | 1,086ms |
+
+Remote latency includes ~500ms network round-trip via sslip.io route. Local GCL benchmarks (section 8.3) show 54-75ms per cycle.
+
+**Pressure testing (concurrent governance cycles):**
+
+| Concurrency | p50 | p95 | Errors |
+|---|---|---|---|
+| 5 | 815ms | 871ms | 0/5 |
+| 10 | 1,048ms | 1,079ms | 0/10 |
+| 20 | 2,430ms | 2,498ms | 0/20 |
+| 50 | 4,777ms | 4,841ms | 0/50 |
+
+Zero errors at all concurrency levels. Signal payloads of 100, 500, and 1,000 handled in ~770ms with no variation.
+
+**Soak (300 sequential cycles):** 0 errors, p50=566ms, latency drift 1.2x across 19 ten-second windows. Mixed concurrent soak (60s, 3 GCL + 2 fleet workers): 479 requests, 0 errors. Post-soak smoke passed cleanly.
+
+**Degradation:** GCL operates correctly when fleet is unreachable. All 6 scenarios degrade gracefully. State thrashing (10 rapid reset/seed cycles) produced 0 failures. Fleet health unaffected by GCL load (p50=2ms).
+
+**Chaos boundary:** 200 simultaneous governance cycles: 0 errors, p50=13,099ms. Subsequent requests returned 503 until recovery. This is the expected single-pod ceiling.
+
+See [ecosystem stress test benchmarks](docs/benchmarks/ecosystem-stress-benchmarks.md) for the full 48-test breakdown.
+
+### 8.8 Production-Emulation Soak (On-Cluster, 2 Hours)
+
+A 2-hour production-emulation soak ran on-cluster on Oberon (pod-to-pod, no external network). The soak driver ran as a Kubernetes Job, exercising the full decision pipeline across all 6 scenarios with 7 degradation injections.
+
+**Result: 2,240 governance cycles. Zero errors. All 5 SLO gates passed.**
+
+| Metric | Value |
+|---|---|
+| Duration | 120 minutes |
+| Total governance cycles | 2,240 |
+| Success rate | 100.0% |
+| E2E latency p50 | 147ms |
+| E2E latency p95 | 504ms |
+| E2E latency p99 | 561ms |
+| Chain integrity verifications | 23/23 passed |
+| GCL availability | 100% |
+| State growth | 514 -> 771 cycles (+257, linear) |
+
+**Degradation injections (7/7 passed):** Two burst-50 concurrent events (0 errors each, ~5s recovery), two invalid fleet intents (correctly rejected with 401), two full GCL state resets (recovered in ~1 second each), one expired event (handled correctly).
+
+**Latency behavior:** Governance cycle latency held flat at 135-155ms across the full 2 hours. A periodic sawtooth pattern (150ms -> 330ms -> 150ms, ~15 minute period) corresponds to Python GC cycles on the cycle history. Peaks stayed well within the 2s SLO and self-recovered without intervention.
+
+**Scenario action distribution (2,240 cycles):**
+
+| Scenario | Committed Actions |
+|---|---|
+| inference_fleet_spike | shed_load (37), pre_warm (45), scale (1) |
+| compliance_breach | alert (44) |
+| capacity_exhaustion | scale (45), shed_load (29), pre_warm (16) |
+| slo_cascade | shed_load (54) |
+| mixed_storm | migrate (72) |
+| multi_cluster_migration | shed_load (18), migrate (9) |
+
+All 6 scenarios produced their expected action types with correct governed behavior.
+
 ## 9. What This System Does Not Claim
 
 This section is required by the build prompt and the EDD rubric. The `TestNoOptimalityOverclaim` test enforces that no source file in the `gcl/` directory makes an optimality claim. No generated text may claim optimality or infallibility.
