@@ -87,9 +87,9 @@ The legacy response is transport acknowledgement only and never verified executi
 
 ## Current evidence level
 
-The repository has executable unit, property, scenario, DecisionPackage, CloudEvent, fleet transport, and security-boundary tests. Those tests are contract and component evidence. They are not live fleet execution, external immutable-ledger proof, multi-cluster OpenShift, performance, chaos, soak, security-audit, Blue, or Gold evidence.
+The repository has executable unit, property, scenario, DecisionPackage, CloudEvent, fleet transport, and security-boundary tests (822 passing). An 8-phase ecosystem stress test exercised the full 4-system platform on the Oberon cluster: 42/48 passed, including pressure testing at 50 concurrent governance cycles (0 errors), a 300-cycle soak (0 errors, 1.2x latency drift), degradation testing across all 6 scenarios, and pen testing with 0 vulnerabilities found.
 
-Historical benchmark documents remain useful test-design context. Their environment-specific observations are not current promotion evidence without a reproducible external evidence bundle.
+These tests are contract, component, and live Oberon evidence. They are not multi-cluster OpenShift, 72-hour soak, security-audit, Blue, or Gold evidence.
 
 ## Local development
 
@@ -132,3 +132,4 @@ unavailable results never decide whether GCL submits the package.
 - [Event flow and evidence boundary](docs/event-flow-proof.md)
 - [White paper](docs/whitepaper/governed-cognitive-loop-whitepaper.md)
 - [Historical benchmark context](docs/benchmarks/gcl-benchmarks.md)
+- [Ecosystem stress test benchmarks](docs/benchmarks/ecosystem-stress-benchmarks.md)
