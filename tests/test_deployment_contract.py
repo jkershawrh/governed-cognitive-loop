@@ -16,9 +16,13 @@ def test_process_local_safety_state_uses_one_worker_and_one_replica():
         )
     )
     deployment = next(
-        document
-        for document in documents
-        if document and document.get("kind") == "Deployment"
-        and document["metadata"]["name"] == "gcl-app"
+        (document
+         for document in documents
+         if document and document.get("kind") == "Deployment"
+         and document["metadata"]["name"] == "gcl-app"),
+        None,
     )
+    assert deployment is not None, "Deployment 'gcl-app' not found in deploy/deployment.yaml"
     assert deployment["spec"]["replicas"] == 1
+    assert deployment["spec"].get("strategy", {}).get("type") == "Recreate", \
+        "Deployment must use Recreate strategy to prevent overlapping process-local state"
