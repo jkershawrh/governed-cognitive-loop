@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: gcl-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: Compile backend
+        run: python -m compileall -q gcl
+      - name: Run backend, contract, and deployment tests
+        env:
+          GCL_LEDGER_SKIP: "1"
+          GCL_FORCE_DETERMINISTIC: "1"
+        run: python -m pytest -q
+
+  manifests:
+    name: Validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install pyyaml
+      - name: Parse deployment and configuration YAML
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = sorted(Path("deploy").rglob("*.yaml")) + sorted(Path("config").rglob("*.yaml"))
+          for path in files:
+              list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+          print(f"validated {len(files)} YAML files")
+          PY
+
+  fleet-contract:
+    name: GCL to fleet contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GCL producer
+        uses: actions/checkout@v7
+        with:
+          path: governed-cognitive-loop
+      - name: Checkout fleet consumer
+        uses: actions/checkout@v7
+        with:
+          repository: jkershawrh/fleet-llm-d
+          path: fleet-llm-d
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: fleet-llm-d/go.mod
+          cache-dependency-path: fleet-llm-d/go.sum
+      - name: Install GCL producer
+        run: python -m pip install -e "./governed-cognitive-loop[dev]"
+      - name: Build and start fleet consumer
+        working-directory: fleet-llm-d
+        env:
+          GCL_DECISION_SIGNING_KEY: a-secure-test-key-with-at-least-thirty-two-bytes
+          GCL_DECISION_SIGNING_KEY_ID: test-key-v1
+        run: |
+          go build -o fleet-controller ./cmd/fleet-controller
+          ./fleet-controller --port 18080 --metrics-port 19091 > fleet.log 2>&1 &
+          echo $! > fleet.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat fleet.log
+          exit 1
+      - name: Submit a signed DecisionPackage CloudEvent
+        working-directory: governed-cognitive-loop
+        run: |
+          python - <<'PY'
+          import httpx
+
+          from gcl.domain.decision_package import to_cloud_event
+          from tests.test_decision_package import _signed_package
+
+          event = to_cloud_event(
+              _signed_package(),
+              source="spiffe://llm-d.ai/ns/gcl/sa/controller",
+          )
+          response = httpx.post(
+              "http://127.0.0.1:18080/api/v2/intents",
+              headers={"Content-Type": "application/cloudevents+json"},
+              json=event.model_dump(mode="json"),
+              timeout=10,
+          )
+          assert response.status_code == 202, response.text
+          payload = response.json()
+          assert payload.get("state") == "ACCEPTED", payload
+          assert payload.get("operation_id"), payload
+          PY
+      - name: Show fleet logs on failure
+        if: failure()
+        working-directory: fleet-llm-d
+        run: cat fleet.log
