@@ -1,0 +1,488 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Governed Autonomy Framework</title><style>body{font-family:"Google Sans",Arial,sans-serif;max-width:850px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333;font-size:11pt}h1{font-size:24pt;color:#1a1a1a;border-bottom:2px solid #c00;padding-bottom:8px}h2{font-size:16pt;color:#1a1a1a;border-bottom:1px solid #ddd;padding-bottom:4px;margin-top:32px}h3{font-size:13pt;color:#333;margin-top:24px}table{border-collapse:collapse;width:100%;margin:16px 0;font-size:10pt}th{background:#f5f5f5;border:1px solid #ddd;padding:8px 12px;text-align:left;font-weight:600}td{border:1px solid #ddd;padding:8px 12px}tr:nth-child(even){background:#fafafa}strong{color:#1a1a1a}hr{border:none;border-top:1px solid #ddd;margin:32px 0}</style></head><body><h1 id="the-governed-autonomy-framework">The Governed Autonomy Framework</h1>
+<p><strong>Observe. Govern. Act. Prove.</strong></p>
+<p>A reusable architecture for consequential autonomous decisions with accountability, trust boundaries, and tamper-evident proof.</p>
+<p><em>Jonathan Kershaw, Red Hat, July 2026</em></p>
+<hr />
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<p>Autonomous systems are making increasingly consequential infrastructure decisions: scaling databases, rerouting traffic, rebalancing fleets, deploying to edge devices. The question is no longer whether to automate these decisions, but how to make automation trustworthy enough that engineering teams and leadership can sleep while it runs.</p>
+<p>The Governed Autonomy Framework answers this by separating consequential decision-making into four independent concerns connected by CloudEvents:</p>
+<ol>
+<li><strong>Observe</strong>: Classify signals, forecast breaches, publish advisory evidence.</li>
+<li><strong>Govern</strong>: Synthesize decisions through falsification gates and honesty boundaries, emit signed proposals.</li>
+<li><strong>Act</strong>: Independently admit, authorize, and execute proposals.</li>
+<li><strong>Prove</strong>: Record tamper-evident, hash-chained evidence of every decision and outcome.</li>
+</ol>
+<p>Each concern is owned by an independent system. No system bypasses its neighbors. The observer never executes. The governor never authorizes. The actuator never fabricates evidence. The ledger never grants authority.</p>
+<p>This separation is not theoretical. It has been validated on a production-class AI inference fleet: 5,534 governance cycles over 8 hours at 100% success rate, 154ms median end-to-end latency, and zero evidence chain integrity failures. The pattern itself, however, is domain-agnostic. Replace the inference-specific classifiers and controllers with domain-specific ones, and the same governance architecture applies to databases, microservices, edge deployments, batch jobs, and compliance-driven infrastructure.</p>
+<p>This paper describes the pattern, explains why the separation matters, and shows how any domain can instantiate it.</p>
+<hr />
+<h2 id="2-the-governed-autonomy-pattern">2. The Governed Autonomy Pattern</h2>
+<p>Most autonomous systems today combine observation, decision-making, execution, and logging into a single service or a tightly coupled pipeline. This creates several problems:</p>
+<ul>
+<li><strong>Trust is binary.</strong> Either you trust the system to observe, decide, execute, and record, or you trust none of it. There is no way to trust the observation layer while distrusting the decision layer.</li>
+<li><strong>Failure is correlated.</strong> A bug in the decision logic can corrupt the execution path and the audit trail simultaneously.</li>
+<li><strong>Accountability is aspirational.</strong> When the same system that made the decision also records what happened, the record is only as trustworthy as the system itself.</li>
+</ul>
+<p>The Governed Autonomy Framework addresses these problems by establishing four independent systems with strict ownership boundaries:</p>
+<p><code>Observer  -&gt;  Governor  -&gt;  Actuator  -&gt;  Ledger
+(Observe)     (Govern)      (Act)         (Prove)</code></p>
+<p>Each system communicates via CloudEvents 1.0, a CNCF standard for interoperable event-driven communication. Each system has its own codebase, deployment, database (if any), and failure mode. Each system can be replaced, upgraded, or scaled independently without affecting its neighbors.</p>
+<p>The key architectural invariant: <strong>no system performs the concern of another</strong>. The observer publishes evidence but never proposes actions. The governor proposes actions but never executes them. The actuator executes but never fabricates evidence. The ledger records evidence but never authorizes execution.</p>
+<hr />
+<h2 id="3-the-four-concerns">3. The Four Concerns</h2>
+<h3 id="31-observe">3.1 Observe</h3>
+<p>The observer's job is to watch a domain, classify what it sees, forecast what is coming, and publish the results as advisory evidence. It never decides, never proposes, and never executes.</p>
+<p><strong>Core capabilities:</strong></p>
+<ul>
+<li><strong>Signal classification</strong>: A tiered cascade handles signal volume efficiently. Deterministic rules filter most signals at near-zero cost. Statistical models handle ambiguous cases. LLM-backed analysis synthesizes complex multi-signal patterns. Each tier passes only what it cannot handle to the next.</li>
+<li><strong>Breach forecasting</strong>: Time-series analysis predicts when key metrics will cross thresholds. The output is a forecast with a confidence envelope, not a directive.</li>
+<li><strong>Blast radius scoping</strong>: Every forecast is scoped to the affected users, services, and infrastructure, so downstream systems know the stakes.</li>
+<li><strong>Advisory-only output</strong>: All output is structured as advisory CloudEvents. The type system enforces <code>advisory_only: true</code>. The observer has no API call to any downstream system.</li>
+</ul>
+<p><strong>Domain-agnostic principle:</strong> The classification tiers, forecasting approach, and advisory event structure work for any observable system. What changes across domains is the specific classifiers and the metrics they watch.</p>
+<h3 id="32-govern">3.2 Govern</h3>
+<p>The governor receives advisory evidence, synthesizes a response through a disciplined pipeline, and emits a signed proposal. It never authorizes and never executes. The LLM interprets context; deterministic systems compute the action.</p>
+<p><strong>Core capabilities:</strong></p>
+<ul>
+<li><strong>Constraint derivation</strong>: Evidence is transformed into typed constraints (capacity, latency, compliance, budget, residency, custom). Each constraint carries the evidence IDs that justify it. A constraint with no justifying evidence is invalid and dropped.</li>
+<li><strong>Horizon prediction</strong>: The governor forecasts metric trajectories over a planning horizon with confidence envelopes. Each cycle re-measures and re-plans from fresh data.</li>
+<li><strong>Objective interpretation</strong>: An LLM (or deterministic template) reads the constraints and evidence, then frames the situation as an optimization objective: cost terms, weights, and rationale. The objective never contains an action.</li>
+<li><strong>Deterministic control</strong>: A deterministic controller computes candidate actions under hard constraints. It selects only the first step (receding horizon discipline), because the situation will change before later steps execute.</li>
+<li><strong>Falsification gate</strong>: Every proposed action faces a battery of deterministic disconfirmation checks before it can be emitted. Does the action assume capacity that evidence says is unavailable? Does it depend on a prediction whose confidence is too low? Is the scale magnitude reasonable? If any check fails, the action is rejected.</li>
+<li><strong>Signed proposals</strong>: Surviving candidates are encoded into signed, expiry-bounded, scope-bound proposals that carry their full evidence chain: constraints, candidates, rejected alternatives, falsification results, and confidence scores.</li>
+</ul>
+<p><strong>Domain-agnostic principle:</strong> The 7-stage pipeline (classify, predict, interpret, plan, falsify, sign, commit) works for any decision domain. What changes is the set of constraint types, the action classes, and the falsification checks.</p>
+<h3 id="33-act">3.3 Act</h3>
+<p>The actuator receives signed proposals and independently decides whether to execute them. It owns admission, authorization, and actuation. It never fabricates observations, never synthesizes decisions, and never records its own proof.</p>
+<p><strong>Core capabilities:</strong></p>
+<ul>
+<li><strong>Admission</strong>: Verify the proposal's signature, check expiry, validate scope binding (tenant, zone), and confirm the proposer's identity.</li>
+<li><strong>Authorization</strong>: Apply domain-specific authorization policy. The actuator is under no obligation to execute a valid proposal; it applies its own judgment about whether the proposed action is appropriate given current state.</li>
+<li><strong>Operation lifecycle</strong>: Track every admitted proposal through a full lifecycle (received, accepted, planned, authorized, actuating, succeeded, failed).</li>
+<li><strong>Independent state</strong>: The actuator maintains its own desired state and observed state. A proposal influences desired state; the actuator is responsible for reconciling observed state toward it.</li>
+</ul>
+<p><strong>Domain-agnostic principle:</strong> Admission, authorization, and lifecycle tracking apply to any actuator. What changes is the specific infrastructure being managed and the authorization policies applied.</p>
+<h3 id="34-prove">3.4 Prove</h3>
+<p>The ledger records tamper-evident, hash-chained evidence of every decision and outcome across all four systems. It is independent infrastructure with its own database and compute. A receipt is not a credential, not an authorization decision, and not proof that infrastructure changed.</p>
+<p><strong>Core capabilities:</strong></p>
+<ul>
+<li><strong>Hash-chained entries</strong>: Every entry includes an entry type, content, correlation ID, agent ID, source ID, timestamp, and a SHA-256 hash linking to the previous entry. Tampering with any entry breaks the chain.</li>
+<li><strong>Correlation-based reconstruction</strong>: Any correlation ID can reconstruct the full decision chain: classify, predict, interpret, plan, falsify, propose or reject, admit, authorize, execute, outcome.</li>
+<li><strong>Chain verification</strong>: Verify the integrity of any entry type chain. Detect tampering or gaps.</li>
+<li><strong>Proof receipts</strong>: Content-addressed verification via input hash. A receipt proves that evidence was recorded at a specific time. It does not grant authority or prove that an action was taken.</li>
+<li><strong>Multi-source evidence</strong>: Records from every system in the pipeline, each identified by source.</li>
+</ul>
+<p><strong>Domain-agnostic principle:</strong> Evidence infrastructure is entirely domain-agnostic. The ledger does not interpret the content of entries; it guarantees their integrity and ordering. Any domain can write to and verify against the same ledger.</p>
+<hr />
+<h2 id="4-why-separation-matters">4. Why Separation Matters</h2>
+<h3 id="41-trust-boundaries">4.1 Trust Boundaries</h3>
+<p>With separation, trust is granular. An organization can:</p>
+<ul>
+<li>Trust the observer's signal classification while auditing the governor's decision synthesis.</li>
+<li>Trust the governor's falsification rigor while restricting the actuator's authorization policy.</li>
+<li>Trust the entire pipeline's correctness while independently verifying through the ledger.</li>
+</ul>
+<p>Without separation, trust is all-or-nothing. You either trust the monolithic system or you do not, and in practice, organizations that cannot fully trust a system impose manual approval gates that defeat the purpose of automation.</p>
+<h3 id="42-independent-failure">4.2 Independent Failure</h3>
+<p>Each system fails independently. Measured on a production-class deployment:</p>
+<ul>
+<li>When the actuator is unreachable, the governor continues producing signed proposals and records the delivery failure. Proposals queue for retry.</li>
+<li>When the governor is unreachable, the actuator continues operating on its last known desired state. The observer continues publishing evidence.</li>
+<li>When the ledger is unreachable, a configured ledger error fails closed. The system does not fall back to fabricated evidence in memory.</li>
+</ul>
+<p>Correlated failure between observer and actuator is eliminated because they share no code, no database, and no network dependency.</p>
+<h3 id="43-accountability">4.3 Accountability</h3>
+<p>Separation makes accountability structural rather than aspirational:</p>
+<ul>
+<li>The governor records its reasoning (constraints, objective, candidates, rejected alternatives, falsification results) in its signed proposal. This is not a log entry; it is a cryptographically bound artifact.</li>
+<li>The actuator records its admission, authorization, and execution decisions independently.</li>
+<li>The ledger records everything with hash-chained integrity, and none of the other three systems can modify what the ledger has recorded.</li>
+</ul>
+<p>The result: for any infrastructure action, you can reconstruct exactly what was observed, what was proposed, why alternatives were rejected, what checks the proposal survived, whether the actuator agreed, and what happened afterward. Every link in that chain is independently verifiable.</p>
+<hr />
+<h2 id="5-the-honesty-boundary">5. The Honesty Boundary</h2>
+<p>LLMs are powerful interpreters of context but unreliable executors of safety-critical logic. The framework draws a strict boundary:</p>
+<p><strong>The LLM can:</strong>
+- Interpret context into an optimization objective (cost terms, weights, rationale).
+- Classify ambiguous signals that deterministic rules cannot handle.
+- Run adversarial probes during falsification (attempting to find flaws in a proposed action).</p>
+<p><strong>The LLM cannot:</strong>
+- Compute the committed action or its parameters.
+- Override hard constraints.
+- Return action fields of any kind.</p>
+<p>This boundary is enforced at three levels:</p>
+<ol>
+<li><strong>Architectural</strong>: The interpreter module has no code path to action types. This is verified by AST inspection in the test suite.</li>
+<li><strong>Runtime</strong>: An OPA (Open Policy Agent) sidecar blocks action fields from LLM responses. Even if the LLM hallucinates an action, it is stripped before reaching the deterministic controller.</li>
+<li><strong>Fallback</strong>: Every LLM call site has a deterministic fallback. If the LLM is unavailable, unreliable, or disabled, deterministic templates and rules handle everything.</li>
+</ol>
+<p>The resulting guarantee: hard-constraint satisfaction and falsification-gated commit, regardless of LLM behavior. The system does not claim optimality (the objective is LLM-specified, so classical optimality guarantees do not hold). It claims safety: the committed action satisfies hard constraints and survived disconfirmation.</p>
+<hr />
+<h2 id="6-falsification-as-a-design-pattern">6. Falsification as a Design Pattern</h2>
+<p>Most systems validate their plans: "Does this plan satisfy the requirements?" Validation asks whether the plan is consistent with what we expect. Falsification asks the opposite: "What evidence would prove this plan wrong?"</p>
+<p>The framework's falsification gate runs after the controller produces a candidate action and before the proposal is signed and emitted. It embodies a principle: the difference between a novice and an expert is that the expert pauses and asks what would make this the wrong call.</p>
+<p><strong>How it works:</strong></p>
+<p>Each falsification check targets a specific assumption the proposed action makes:</p>
+<ul>
+<li>Does the action assume capacity that evidence says is unavailable?</li>
+<li>Does it scale by a magnitude that exceeds reasonable bounds?</li>
+<li>Does it assume a warmup time faster than measurements show?</li>
+<li>Does it depend on a prediction whose confidence is below a threshold?</li>
+<li>Does it propose an action that violates an active compliance constraint?</li>
+<li>Does it shed load without bounded duration and rate limits?</li>
+<li>Does it migrate without a verified target?</li>
+</ul>
+<p>If any check fails, the action is rejected with a named failure and reasoning. The rejection is recorded in the ledger. No override exists for a failed falsification check.</p>
+<p>After all deterministic checks pass, an optional adversarial LLM probe attempts to find flaws that deterministic checks cannot express. If the adversarial probe identifies a flaw, the action is rejected.</p>
+<p><strong>Why this matters for trust:</strong> Falsification is the mechanism that lets leadership trust an autonomous system. The system is not just doing what it thinks is right; it is actively trying to prove itself wrong before acting, and it records the results of every attempt.</p>
+<hr />
+<h2 id="7-evidence-as-infrastructure">7. Evidence as Infrastructure</h2>
+<p>Traditional logging is a side effect of operation. The governed autonomy framework treats evidence as independent infrastructure with its own service, database, and verification guarantees.</p>
+<p>The distinction matters:</p>
+<table>
+<thead>
+<tr>
+<th>Logging</th>
+<th>Evidence Infrastructure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Written by the system being logged</td>
+<td>Written to an independent system</td>
+</tr>
+<tr>
+<td>Mutable (log rotation, deletion, redaction)</td>
+<td>Immutable (hash-chained, tamper-evident)</td>
+</tr>
+<tr>
+<td>Trusted as much as the system that wrote it</td>
+<td>Independently verifiable</td>
+</tr>
+<tr>
+<td>Searched by timestamp and keyword</td>
+<td>Reconstructed by correlation ID</td>
+</tr>
+<tr>
+<td>Proves that code ran</td>
+<td>Proves that evidence was recorded</td>
+</tr>
+<tr>
+<td>Silent when absent</td>
+<td>Chain verification detects gaps</td>
+</tr>
+</tbody>
+</table>
+<p>Evidence infrastructure closes the accountability gap that logging cannot:</p>
+<ul>
+<li>A log entry that says "scaled to 5 replicas" is only as trustworthy as the system that wrote it.</li>
+<li>A hash-chained evidence entry with a correlation ID linking it to the original observation, the governance decision, the falsification results, and the execution outcome is independently verifiable.</li>
+<li>A missing entry in a hash chain is detectable. A missing log entry is not.</li>
+</ul>
+<p><strong>Key constraint:</strong> A receipt is never a credential. Evidence receipts prove that something was recorded; they do not authorize execution, grant permissions, or prove that infrastructure changed. This constraint prevents the ledger from becoming a backdoor authority source.</p>
+<hr />
+<h2 id="8-domain-applications-beyond-inference">8. Domain Applications Beyond Inference</h2>
+<p>The governed autonomy framework was developed and validated on AI inference fleet management. But the pattern itself, four independent systems connected by CloudEvents, is domain-agnostic. Here is how it maps to other consequential infrastructure domains.</p>
+<h3 id="81-database-fleet-management">8.1 Database Fleet Management</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Inference Fleet</th>
+<th>Database Fleet</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Observe</strong></td>
+<td>Latency spikes, throughput drops, SLO breaches</td>
+<td>Query latency, replication lag, connection pool exhaustion, storage growth</td>
+</tr>
+<tr>
+<td><strong>Govern</strong></td>
+<td>Scale replicas, shed load, migrate models</td>
+<td>Scale read replicas, promote standby, rebalance shards, trigger vacuum</td>
+</tr>
+<tr>
+<td><strong>Act</strong></td>
+<td>Kubernetes CRDs, HPA, placement solver</td>
+<td>Database operator CRDs, pgBouncer config, shard routing</td>
+</tr>
+<tr>
+<td><strong>Prove</strong></td>
+<td>Governance decisions, placement changes</td>
+<td>Schema migrations, failover events, capacity changes</td>
+</tr>
+</tbody>
+</table>
+<p>The falsification checks adapt naturally: "Does this shard rebalance assume disk capacity that evidence says is unavailable?" "Does this read replica scale exceed the connection limit of the primary?"</p>
+<h3 id="82-microservice-mesh-governance">8.2 Microservice Mesh Governance</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Inference Fleet</th>
+<th>Service Mesh</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Observe</strong></td>
+<td>Model latency, GPU utilization, request classification</td>
+<td>Service latency, error rates, dependency health, circuit breaker state</td>
+</tr>
+<tr>
+<td><strong>Govern</strong></td>
+<td>Route by prompt complexity, scale inference backends</td>
+<td>Route by service version (canary weights), scale by dependency pressure</td>
+</tr>
+<tr>
+<td><strong>Act</strong></td>
+<td>Inference gateway routing, fleet placement</td>
+<td>Service mesh routing rules, HPA targets, circuit breaker config</td>
+</tr>
+<tr>
+<td><strong>Prove</strong></td>
+<td>Routing decisions, scaling events</td>
+<td>Traffic shift decisions, rollback events, SLO violations</td>
+</tr>
+</tbody>
+</table>
+<p>The honesty boundary is especially valuable here: an LLM can interpret complex multi-service dependency patterns and frame the objective ("reduce cascade risk to service X"), while deterministic control computes the specific canary percentages and scaling targets.</p>
+<h3 id="83-edgeiot-fleet-operations">8.3 Edge/IoT Fleet Operations</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Inference Fleet</th>
+<th>Edge Fleet</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Observe</strong></td>
+<td>Cluster health, model performance, tenant demand</td>
+<td>Device health, connectivity, battery, sensor drift, firmware status</td>
+</tr>
+<tr>
+<td><strong>Govern</strong></td>
+<td>Cross-cluster placement, KV-cache migration</td>
+<td>Firmware rollout strategy, workload placement, data sync priority</td>
+</tr>
+<tr>
+<td><strong>Act</strong></td>
+<td>Fleet CRDs, multi-cluster orchestration</td>
+<td>Device management platform, OTA update service, edge orchestrator</td>
+</tr>
+<tr>
+<td><strong>Prove</strong></td>
+<td>Fleet operations, compliance events</td>
+<td>Update deployments, device state transitions, compliance attestations</td>
+</tr>
+</tbody>
+</table>
+<p>Edge fleets add a dimension: intermittent connectivity. The separation of concerns handles this naturally. The governor produces signed proposals with expiry bounds. If a proposal cannot be delivered before expiry, it is rejected rather than executed stale. The ledger records the delivery failure. No special-casing is needed.</p>
+<h3 id="84-batch-job-orchestration">8.4 Batch Job Orchestration</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Inference Fleet</th>
+<th>Batch Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Observe</strong></td>
+<td>Request volume, model utilization, queue depth</td>
+<td>Job queue depth, worker utilization, data freshness, dependency completion</td>
+</tr>
+<tr>
+<td><strong>Govern</strong></td>
+<td>Scale workers, route requests, pre-warm models</td>
+<td>Scale worker pools, prioritize queues, preempt low-priority jobs</td>
+</tr>
+<tr>
+<td><strong>Act</strong></td>
+<td>Kubernetes CRDs, fleet scheduling</td>
+<td>Job scheduler, resource manager, queue broker</td>
+</tr>
+<tr>
+<td><strong>Prove</strong></td>
+<td>Scaling decisions, routing changes</td>
+<td>Scheduling decisions, preemption events, SLA compliance</td>
+</tr>
+</tbody>
+</table>
+<p>Falsification prevents the classic batch anti-pattern of scaling workers beyond the bottleneck: "Does this worker scale assume downstream throughput that evidence shows is saturated?"</p>
+<h3 id="85-compliance-driven-infrastructure">8.5 Compliance-Driven Infrastructure</h3>
+<p>For financial services, healthcare, and sovereign cloud, every infrastructure decision must be auditable, explainable, and traceable to evidence. The framework provides this by construction:</p>
+<ul>
+<li>Every decision carries its evidence chain (observer to governor to actuator to ledger).</li>
+<li>Every rejected alternative is recorded with reasoning.</li>
+<li>Every falsification check is recorded with its verdict.</li>
+<li>The evidence chain is independently verifiable through the hash-chained ledger.</li>
+<li>Data residency constraints are first-class (the constraint type system includes <code>residency</code>).</li>
+</ul>
+<p>Compliance teams can verify: for any infrastructure change, what was the triggering observation, what constraints were active, what alternatives were considered, why were they rejected, what checks did the selected action survive, and what was the outcome.</p>
+<hr />
+<h2 id="9-getting-started">9. Getting Started</h2>
+<p>To instantiate the governed autonomy framework for a new domain:</p>
+<h3 id="step-1-define-your-observation-domain">Step 1: Define Your Observation Domain</h3>
+<p>Build domain-specific classifiers that watch your system and publish advisory CloudEvents. The tiered cascade pattern (deterministic rules, statistical models, LLM synthesis) controls cost: most signals are handled by cheap deterministic rules; LLMs are reserved for genuinely ambiguous cases.</p>
+<p>Your observer must enforce the advisory-only boundary. It publishes evidence. It never proposes actions.</p>
+<h3 id="step-2-adapt-the-governance-pipeline">Step 2: Adapt the Governance Pipeline</h3>
+<p>The 7-stage governance pipeline (classify, predict, interpret, plan, falsify, sign, commit) is largely reusable. What you customize:</p>
+<ul>
+<li><strong>Constraint types</strong>: Add domain-specific types (e.g., <code>replication_lag</code>, <code>connection_pool</code>, <code>battery_level</code>) alongside the universal ones (capacity, compliance, budget).</li>
+<li><strong>Action classes</strong>: Define the canonical actions for your domain (e.g., <code>db.scale_read_replicas</code>, <code>mesh.shift_canary</code>, <code>edge.deploy_firmware</code>).</li>
+<li><strong>Falsification checks</strong>: Write checks that target the specific assumptions your domain's actions make. Each check answers: "What evidence would prove this action wrong?"</li>
+</ul>
+<p>The honesty boundary, deterministic control, receding horizon discipline, signed proposals, and accountability tracking work without modification.</p>
+<h3 id="step-3-build-your-actuator">Step 3: Build Your Actuator</h3>
+<p>Build a domain-specific actuator that:</p>
+<ul>
+<li>Admits signed proposals (verify signature, check expiry, validate scope).</li>
+<li>Applies its own authorization policy (the actuator is never obligated to execute a valid proposal).</li>
+<li>Tracks operation lifecycle (received through succeeded/failed).</li>
+<li>Maintains independent desired and observed state.</li>
+</ul>
+<h3 id="step-4-connect-the-ledger">Step 4: Connect the Ledger</h3>
+<p>The evidence ledger is domain-agnostic. Connect it as-is. Define your entry types (each system writes entries tagged with its entry type prefix) and correlation ID strategy (typically: one correlation ID per end-to-end decision chain, from initial observation through final outcome).</p>
+<h3 id="step-5-validate">Step 5: Validate</h3>
+<p>Run the same validation sequence that proved the pattern on inference fleets:</p>
+<ol>
+<li><strong>Smoke</strong>: All endpoints healthy, end-to-end event flow works.</li>
+<li><strong>Performance baseline</strong>: Measure governance cycle latency under normal load.</li>
+<li><strong>Pressure</strong>: Concurrent governance cycles with zero errors.</li>
+<li><strong>Edge cases</strong>: Evidence poisoning, falsification bypass attempts, cooldown behavior.</li>
+<li><strong>Degradation</strong>: Each system unreachable in turn; verify graceful degradation.</li>
+<li><strong>Soak</strong>: Extended run with mixed scenarios; verify zero drift.</li>
+<li><strong>Penetration</strong>: Injection, traversal, and replay attacks.</li>
+<li><strong>Chaos</strong>: Simultaneous high load with component failures.</li>
+</ol>
+<hr />
+<h2 id="10-verified-evidence">10. Verified Evidence</h2>
+<p>The governed autonomy framework is not a proposal. It has been implemented and validated on a production-class AI inference fleet comprising four independent systems: deepfield-fleet (observe), governed-cognitive-loop (govern), fleet-llm-d (act), and are-immutable-ledger (prove).</p>
+<h3 id="validation-results">Validation Results</h3>
+<p><strong>Unit and integration coverage:</strong></p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Tests Passed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Observer (deepfield-fleet)</td>
+<td>295</td>
+</tr>
+<tr>
+<td>Governor (governed-cognitive-loop)</td>
+<td>822</td>
+</tr>
+<tr>
+<td>Actuator (fleet-llm-d)</td>
+<td>462</td>
+</tr>
+<tr>
+<td>Ledger (are-immutable-ledger)</td>
+<td>40</td>
+</tr>
+</tbody>
+</table>
+<p><strong>8-phase ecosystem stress test</strong> (on-cluster, OpenShift):</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Smoke</td>
+<td>5/6</td>
+</tr>
+<tr>
+<td>Performance baseline</td>
+<td>1/2</td>
+</tr>
+<tr>
+<td>Pressure (50 concurrent)</td>
+<td>7/7</td>
+</tr>
+<tr>
+<td>Edge cases</td>
+<td>7/9</td>
+</tr>
+<tr>
+<td>Degradation (6 scenarios)</td>
+<td>10/10</td>
+</tr>
+<tr>
+<td>Soak (300 cycles)</td>
+<td>6/6</td>
+</tr>
+<tr>
+<td>Penetration testing</td>
+<td>5/5</td>
+</tr>
+<tr>
+<td>Chaos (200 simultaneous)</td>
+<td>1/3</td>
+</tr>
+</tbody>
+</table>
+<p><strong>8-hour production-emulation soak</strong> (on-cluster, pod-to-pod, production CloudEvent pipeline):</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total governance cycles</td>
+<td>5,534</td>
+</tr>
+<tr>
+<td>Success rate</td>
+<td>100.0%</td>
+</tr>
+<tr>
+<td>End-to-end latency p50</td>
+<td>154ms</td>
+</tr>
+<tr>
+<td>End-to-end latency p95</td>
+<td>485ms</td>
+</tr>
+<tr>
+<td>Chain integrity verifications</td>
+<td>95/95 passed</td>
+</tr>
+<tr>
+<td>Degradation injections</td>
+<td>15/15 passed</td>
+</tr>
+<tr>
+<td>Health availability</td>
+<td>100% (both governor and actuator)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Resilience</strong> (on-cluster): Pod kill recovery in 8-9ms. Rapid restart cycling (5x) with zero data loss. Post-disruption soak: 28 events, 0 errors.</p>
+<p><strong>Runtime footprint</strong>: The entire 4-system platform idles at approximately 8 millicores CPU and 210 MB memory. For a system managing consequential infrastructure decisions on the order of seconds to minutes, the governance overhead is negligible.</p>
+<h3 id="what-this-proves">What This Proves</h3>
+<p>These results prove that the governed autonomy pattern works at production scale with production constraints. The 4-system separation does not introduce unacceptable latency, does not create operational complexity that undermines reliability, and does not require heroic engineering to maintain.</p>
+<p>More importantly: none of these results depend on the inference-fleet domain. The governance pipeline, falsification gate, signed proposals, and evidence infrastructure are domain-agnostic. The inference-specific components (model classifiers, GPU/CPU routing, KV-cache transfer) plug into the same slots that database classifiers, service mesh routers, or edge device managers would occupy.</p>
+<hr />
+<h2 id="the-long-view">The Long View</h2>
+<p>Governed autonomy is not a product feature. It is an architectural pattern that answers a question every organization faces as it automates consequential decisions: how do you let systems act autonomously while maintaining the accountability, trust boundaries, and verifiable proof that leadership, compliance, and engineering teams require?</p>
+<p>The answer is separation. Separate observation from decision-making. Separate decision-making from execution. Separate execution from proof. Connect them with standard events. Enforce honesty boundaries on AI interpretation. Falsify every proposed action before emitting it. Record everything in independent, tamper-evident infrastructure.</p>
+<p>The pattern works. The evidence is on the ledger.</p>
+<hr />
+<p><em>Red Hat internal. July 2026.</em></p></body></html>
