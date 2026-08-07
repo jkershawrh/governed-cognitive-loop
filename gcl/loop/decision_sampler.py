@@ -97,7 +97,7 @@ class DecisionSampler:
         self._ledger_token = ledger_token or settings.ledger_bearer_token or ""
         self._sample_rate = sample_rate
         self._poll_interval = poll_interval
-        self._last_seen_id = 0
+        self._last_seen_position = 0
         self._audit_results: List[Dict] = []
         self._ledger = LedgerClient(url=self._ledger_url)
 
@@ -156,10 +156,12 @@ class DecisionSampler:
                 data = resp.json()
 
                 entries = data if isinstance(data, list) else data.get("entries", [])
-                new_entries = [e for e in entries if e.get("id", 0) > self._last_seen_id]
+                new_entries = [e for e in entries
+                               if e.get("chain_position", 0) > self._last_seen_position]
 
                 if new_entries:
-                    self._last_seen_id = max(e.get("id", 0) for e in new_entries)
+                    self._last_seen_position = max(
+                        e.get("chain_position", 0) for e in new_entries)
 
                 return new_entries
         except Exception as e:
@@ -190,5 +192,5 @@ class DecisionSampler:
             "survives": survives,
             "fails": fails,
             "disagreement_rate": round(fails / max(1, total), 3),
-            "last_seen_id": self._last_seen_id,
+            "last_seen_position": self._last_seen_position,
         }
