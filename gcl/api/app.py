@@ -1,4 +1,7 @@
+import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,8 +10,54 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gcl.api.routes import router
+from gcl.config import get_settings
+from gcl.loop.decision_sampler import DecisionSampler
+
+logger = logging.getLogger(__name__)
+_sampler: DecisionSampler | None = None
 
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+
+def get_sampler() -> DecisionSampler | None:
+    return _sampler
+
+
+async def _sampler_loop(sampler: DecisionSampler) -> None:
+    while True:
+        try:
+            verdicts = await sampler.poll_and_audit()
+            if verdicts:
+                fails = sum(1 for v in verdicts if v.get("verdict") == "FAILS")
+                logger.info("Sampler: %d verdicts, %d FAILS", len(verdicts), fails)
+        except Exception:
+            logger.exception("Decision sampler error")
+        await asyncio.sleep(sampler._poll_interval)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _sampler
+    settings = get_settings()
+    if settings.ledger_url:
+        _sampler = DecisionSampler(
+            ledger_url=settings.ledger_url,
+            ledger_token=settings.ledger_bearer_token,
+            sample_rate=0.05,
+            poll_interval=60,
+        )
+        task = asyncio.create_task(_sampler_loop(_sampler))
+        logger.info("Decision sampler started (ledger=%s)", settings.ledger_url)
+    else:
+        task = None
+        logger.info("Decision sampler disabled — no ledger_url configured")
+    yield
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 def create_app() -> FastAPI:
@@ -19,6 +68,7 @@ def create_app() -> FastAPI:
             "Governed decision synthesis and falsification. Surviving decisions are "
             "signed proposals, never claims of infrastructure execution."
         ),
+        lifespan=lifespan,
     )
 
     origins = os.environ.get("GCL_CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -32,6 +82,14 @@ def create_app() -> FastAPI:
     @app.get("/healthz")
     async def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/api/v1/sampler/summary")
+    async def sampler_summary() -> dict:
+        if _sampler is None:
+            return {"enabled": False}
+        summary = _sampler.get_summary()
+        summary["enabled"] = True
+        return summary
 
     app.include_router(router)
 

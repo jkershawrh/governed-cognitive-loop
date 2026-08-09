@@ -97,7 +97,7 @@ class DecisionSampler:
         self._ledger_token = ledger_token or settings.ledger_bearer_token or ""
         self._sample_rate = sample_rate
         self._poll_interval = poll_interval
-        self._last_seen_position = 0
+        self._last_seen_ts = 0
         self._audit_results: List[Dict] = []
         self._ledger = LedgerClient(url=self._ledger_url)
 
@@ -149,21 +149,30 @@ class DecisionSampler:
                     headers["Authorization"] = f"Bearer {self._ledger_token}"
 
                 url = f"{self._ledger_url.rstrip('/')}/api/entries"
-                params = {"entry_type": "decision.record", "page_size": 100}
+                params: Dict[str, Any] = {
+                    "entry_type": "decision.record",
+                    "page_size": 100,
+                }
+                if self._last_seen_ts > 0:
+                    params["from_ts"] = self._last_seen_ts + 1
 
-                resp = await client.get(url, params=params, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
+                all_entries: List[Dict] = []
+                while True:
+                    resp = await client.get(url, params=params, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    entries = data if isinstance(data, list) else data.get("entries", [])
+                    all_entries.extend(entries)
+                    next_token = data.get("next_page_token", "") if isinstance(data, dict) else ""
+                    if not next_token or len(all_entries) >= 500:
+                        break
+                    params["page_token"] = next_token
 
-                entries = data if isinstance(data, list) else data.get("entries", [])
-                new_entries = [e for e in entries
-                               if e.get("chain_position", 0) > self._last_seen_position]
+                if all_entries:
+                    self._last_seen_ts = max(
+                        e.get("written_ts", 0) for e in all_entries)
 
-                if new_entries:
-                    self._last_seen_position = max(
-                        e.get("chain_position", 0) for e in new_entries)
-
-                return new_entries
+                return all_entries
         except Exception as e:
             logger.warning("Failed to fetch decision records: %s", str(e)[:60])
             return []
@@ -192,5 +201,5 @@ class DecisionSampler:
             "survives": survives,
             "fails": fails,
             "disagreement_rate": round(fails / max(1, total), 3),
-            "last_seen_position": self._last_seen_position,
+            "last_seen_ts": self._last_seen_ts,
         }
