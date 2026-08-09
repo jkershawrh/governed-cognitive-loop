@@ -43,8 +43,9 @@ async def lifespan(app: FastAPI):
         _sampler = DecisionSampler(
             ledger_url=settings.ledger_url,
             ledger_token=settings.ledger_bearer_token,
-            sample_rate=0.05,
+            sample_rate=0.01,
             poll_interval=60,
+            max_verdicts_per_poll=10,
         )
         task = asyncio.create_task(_sampler_loop(_sampler))
         logger.info("Decision sampler started (ledger=%s)", settings.ledger_url)

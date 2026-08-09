@@ -18,6 +18,7 @@ import httpx
 
 from gcl.adapter.decision_event_adapter import decision_record_to_evidence
 from gcl.config import get_settings
+from gcl.inference.client import infer, is_inference_available
 from gcl.loop.ledger import LedgerClient
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,48 @@ def audit_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+_PROBE_SYSTEM = (
+    "You audit cascade compression decisions. A signal was DROPPED by an automated agent. "
+    "Deterministic checks flagged this drop as suspicious (medium+ severity or low confidence). "
+    "Your job: was the DROP actually correct despite the flag? "
+    "Respond with JSON only: "
+    '{"correct_drop": true, "reason": "..."} if the drop was justified, or '
+    '{"correct_drop": false, "reason": "..."} if the signal should NOT have been dropped.'
+)
+
+
+async def _llm_probe_decision(decision: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not is_inference_available():
+        return None
+    prompt = (
+        f"Signal type: {decision.get('subject_type', 'unknown')}\n"
+        f"Severity: {decision.get('severity', 'unknown')}\n"
+        f"Confidence: {decision.get('confidence', 'unknown')}\n"
+        f"Outcome: {decision.get('outcome', 'unknown')}\n"
+        f"Agent: {decision.get('agent', 'unknown')}\n"
+        f"Domain: {decision.get('domain', 'unknown')}\n\n"
+        "Was this drop correct despite the severity/confidence flags?"
+    )
+    try:
+        result = await infer(prompt, system=_PROBE_SYSTEM)
+        if result is None:
+            return None
+        raw = result.text.strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        data = json.loads(raw[start:end + 1])
+        return {
+            "correct_drop": data.get("correct_drop", False),
+            "reason": data.get("reason", ""),
+            "model": result.model,
+        }
+    except Exception as e:
+        logger.warning("LLM probe failed: %s", str(e)[:60])
+        return None
+
+
 class DecisionSampler:
     """Polls the immutable ledger for decision records and audits a sample."""
 
@@ -89,14 +132,16 @@ class DecisionSampler:
         self,
         ledger_url: str = "",
         ledger_token: str = "",
-        sample_rate: float = 0.05,
+        sample_rate: float = 0.01,
         poll_interval: int = 60,
+        max_verdicts_per_poll: int = 10,
     ):
         settings = get_settings()
         self._ledger_url = ledger_url or settings.ledger_url or ""
         self._ledger_token = ledger_token or settings.ledger_bearer_token or ""
         self._sample_rate = sample_rate
         self._poll_interval = poll_interval
+        self._max_verdicts_per_poll = max_verdicts_per_poll
         self._last_seen_ts = 0
         self._audit_results: List[Dict] = []
         self._ledger = LedgerClient(url=self._ledger_url)
@@ -110,29 +155,36 @@ class DecisionSampler:
         if not entries:
             return []
 
-        all_decisions = []
+        auditable_with_corr = []
         for entry in entries:
             content = entry.get("content", {})
             if isinstance(content, str):
                 content = json.loads(content)
+            corr_id = entry.get("correlation_id", "")
             for d in content.get("decisions", []):
-                d["domain"] = content.get("domain", "")
-                all_decisions.append(d)
+                if d.get("outcome") in ("drop", "suppress", "dedupe"):
+                    d["domain"] = content.get("domain", "")
+                    auditable_with_corr.append((d, corr_id))
 
-        auditable = [d for d in all_decisions if d.get("outcome") in ("drop", "suppress", "dedupe")]
-
-        if not auditable:
+        if not auditable_with_corr:
             return []
 
-        sample_size = max(1, int(len(auditable) * self._sample_rate))
-        sampled = random.sample(auditable, min(sample_size, len(auditable)))
+        sample_size = max(1, int(len(auditable_with_corr) * self._sample_rate))
+        sample_size = min(sample_size, self._max_verdicts_per_poll)
+        sampled = random.sample(auditable_with_corr, min(sample_size, len(auditable_with_corr)))
 
         verdicts = []
-        for d in sampled:
+        for d, corr_id in sampled:
             v = audit_decision(d)
+            if v["verdict"] == "FAILS":
+                probe = await _llm_probe_decision(d)
+                if probe is not None:
+                    v["probe_result"] = probe
+                    if probe["correct_drop"]:
+                        v["verdict"] = "SURVIVES"
+                        v["reason"] = f"LLM probe overrode deterministic FAIL: {probe['reason']}"
             verdicts.append(v)
-
-            await self._write_verdict(v, entry.get("correlation_id", ""))
+            await self._write_verdict(v, corr_id)
 
         self._audit_results.extend(verdicts)
         if len(self._audit_results) > 1000:
@@ -196,10 +248,15 @@ class DecisionSampler:
         total = len(self._audit_results)
         fails = sum(1 for r in self._audit_results if r.get("verdict") == "FAILS")
         survives = sum(1 for r in self._audit_results if r.get("verdict") == "SURVIVES")
+        probed = sum(1 for r in self._audit_results if r.get("probe_result") is not None)
+        overridden = sum(1 for r in self._audit_results
+                         if r.get("probe_result", {}).get("correct_drop") is True)
         return {
             "total_audited": total,
             "survives": survives,
             "fails": fails,
             "disagreement_rate": round(fails / max(1, total), 3),
+            "probed": probed,
+            "llm_overrides": overridden,
             "last_seen_ts": self._last_seen_ts,
         }
