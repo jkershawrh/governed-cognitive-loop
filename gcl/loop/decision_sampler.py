@@ -250,7 +250,7 @@ class DecisionSampler:
         survives = sum(1 for r in self._audit_results if r.get("verdict") == "SURVIVES")
         probed = sum(1 for r in self._audit_results if r.get("probe_result") is not None)
         overridden = sum(1 for r in self._audit_results
-                         if r.get("probe_result", {}).get("correct_drop") is True)
+                         if (r.get("probe_result") or {}).get("correct_drop") is True)
         return {
             "total_audited": total,
             "survives": survives,
