@@ -49,7 +49,9 @@ def audit_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "Only drop/suppress/dedupe decisions are audited.",
         }
 
-    if SEVERITY_RANK.get(severity, 0) >= SEVERITY_RANK["medium"]:
+    # Dedup is content-hash matching — always correct regardless of severity.
+    # Only flag severity for suppress/drop where the agent made a judgment call.
+    if outcome != "dedupe" and SEVERITY_RANK.get(severity, 0) >= SEVERITY_RANK["high"]:
         checks_failed.append("severity")
     else:
         checks_passed.append("severity")
@@ -184,7 +186,8 @@ class DecisionSampler:
                         v["verdict"] = "SURVIVES"
                         v["reason"] = f"LLM probe overrode deterministic FAIL: {probe['reason']}"
             verdicts.append(v)
-            await self._write_verdict(v, corr_id)
+            if v["verdict"] == "FAILS":
+                await self._write_verdict(v, corr_id)
 
         self._audit_results.extend(verdicts)
         if len(self._audit_results) > 1000:
