@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -51,7 +53,7 @@ async def lifespan(app: FastAPI):
         logger.info("Decision sampler started (ledger=%s)", settings.ledger_url)
     else:
         task = None
-        logger.info("Decision sampler disabled — no ledger_url configured")
+        logger.info("Decision sampler disabled: no ledger_url configured")
     yield
     if task:
         task.cancel()

@@ -5,8 +5,19 @@ echo "=== pre-commit: governed-cognitive-loop ==="
 
 # 1. No secrets
 echo "[1/5] Scanning for secrets..."
-if git diff --cached --name-only | xargs grep -lE "(password|secret|token|api_key)=" 2>/dev/null | grep -v "podman-compose.yaml\|constraints.yaml\|test_\|conftest\|\.md$" | head -1 | grep -q .; then
-  echo "FAIL: Possible secrets in staged files"
+# Scan the added lines only, and require an actual quoted literal. Grepping
+# whole files for "token=" flagged ordinary keyword arguments such as
+# `ledger_token=settings.ledger_bearer_token`, which made any file containing
+# one impossible to commit.
+if git diff --cached --unified=0 -- . ':(exclude)podman-compose.yaml' ':(exclude)constraints.yaml' ':(exclude)*.md' \
+   | grep -E "^\+" | grep -v "^+++" \
+   | grep -vE "test_|conftest" \
+   | grep -qE "(password|secret|token|api_key)[a-z_]*[[:space:]]*=[[:space:]]*['\"][^'\"]{8,}['\"]"; then
+  echo "FAIL: Possible hardcoded secret in staged changes"
+  git diff --cached --unified=0 -- . ':(exclude)podman-compose.yaml' ':(exclude)constraints.yaml' ':(exclude)*.md' \
+    | grep -E "^\+" | grep -v "^+++" \
+    | grep -vE "test_|conftest" \
+    | grep -E "(password|secret|token|api_key)[a-z_]*[[:space:]]*=[[:space:]]*['\"][^'\"]{8,}['\"]" | head -3
   exit 1
 fi
 echo "  OK"
