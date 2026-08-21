@@ -388,8 +388,8 @@ class EcosystemStressTest:
             print(f"    Cooldown: first={first_committed} second={second_committed} {'PASS' if ok else 'FAIL'}")
         else:
             report.add(StressResult("cooldown_blocks_repeat", True, ms2,
-                                  f"first not committed, cooldown test N/A"))
-            print(f"    Cooldown: first not committed, test N/A")
+                                  "first not committed, cooldown test N/A"))
+            print("    Cooldown: first not committed, test N/A")
 
         # 4E: Cross-system boundary
         print("  --- 4E: Cross-system boundary ---")
@@ -537,7 +537,7 @@ class EcosystemStressTest:
             print(f"    Fleet health under GCL load: p50={p50:.0f}ms ({len(finite_lats)}/10 responded)")
         else:
             report.add(StressResult("fleet_health_under_load", False, 0, "Fleet unresponsive"))
-            print(f"    Fleet health under GCL load: UNRESPONSIVE")
+            print("    Fleet health under GCL load: UNRESPONSIVE")
 
         for r in report.results:
             if not r.passed:
@@ -595,8 +595,8 @@ class EcosystemStressTest:
                                       {"drift": drift, "bucket_medians": bucket_medians}))
                 print(f"  Latency stability: drift={drift:.1f}x {'PASS' if ok else 'FAIL (>3x drift)'}")
         else:
-            report.add(StressResult("soak_300_sequential", False, wall, f"All 300 cycles failed"))
-            print(f"  300 cycles: ALL FAILED")
+            report.add(StressResult("soak_300_sequential", False, wall, "All 300 cycles failed"))
+            print("  300 cycles: ALL FAILED")
 
         # 6C: Memory/state leak check via cycle history growth
         print("  --- 6C: State leak check ---")

@@ -7,8 +7,6 @@ then optionally an LLM adversary probe.
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
 import logging
 import random
@@ -16,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from gcl.adapter.decision_event_adapter import decision_record_to_evidence
 from gcl.config import get_settings
 from gcl.inference.client import infer, is_inference_available
 from gcl.loop.ledger import LedgerClient
@@ -235,7 +232,6 @@ class DecisionSampler:
     async def _write_verdict(self, verdict: Dict, correlation_id: str) -> None:
         """Write audit verdict back to the ledger."""
         try:
-            content = json.dumps(verdict, sort_keys=True, separators=(",", ":"))
             await self._ledger.write_entry(
                 entry_type="audit.verdict",
                 content=verdict,

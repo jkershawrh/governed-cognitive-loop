@@ -10,7 +10,7 @@ from typing import Optional
 
 import httpx
 
-from gcl.adapter.intent_mapping import FleetIntent, map_action_to_intent
+from gcl.adapter.intent_mapping import map_action_to_intent
 from gcl.config import get_settings
 from gcl.domain.contracts import ActionStep
 
