@@ -9,6 +9,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gcl.domain.contracts import (
@@ -257,8 +262,8 @@ class DecisionPackageV1(ContractModel):
 class SignedDecisionPackageV1(ContractModel):
     package: DecisionPackageV1
     digest: str = Field(pattern=DIGEST_PATTERN)
-    signature: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
-    algorithm: Literal["HMAC-SHA256"] = "HMAC-SHA256"
+    signature: str = Field(pattern=r"^[A-Za-z0-9_-]{43,86}$")
+    algorithm: Literal["Ed25519", "HMAC-SHA256"] = "Ed25519"
     key_id: str = Field(min_length=1, max_length=256)
 
     @model_validator(mode="after")
@@ -273,20 +278,27 @@ class SignedDecisionPackageV1(ContractModel):
         package: DecisionPackageV1,
         key: bytes,
         key_id: str,
+        *,
+        algorithm: str = "Ed25519",
     ) -> "SignedDecisionPackageV1":
-        if len(key) < 32:
-            raise ValueError("decision signing key must contain at least 32 bytes")
-        signature = (
-            base64.urlsafe_b64encode(
-                hmac.new(key, canonical_json(package), hashlib.sha256).digest()
-            )
-            .rstrip(b"=")
-            .decode("ascii")
-        )
+        message = canonical_json(package)
+        if algorithm == "Ed25519":
+            if len(key) != 32:
+                raise ValueError("Ed25519 signing key must be exactly 32 bytes (seed)")
+            private_key = Ed25519PrivateKey.from_private_bytes(key)
+            sig_bytes = private_key.sign(message)
+        elif algorithm == "HMAC-SHA256":
+            if len(key) < 32:
+                raise ValueError("HMAC signing key must contain at least 32 bytes")
+            sig_bytes = hmac.new(key, message, hashlib.sha256).digest()
+        else:
+            raise ValueError(f"unsupported signing algorithm: {algorithm}")
+        signature = base64.urlsafe_b64encode(sig_bytes).rstrip(b"=").decode("ascii")
         return cls(
             package=package,
             digest=sha256_ref(package),
             signature=signature,
+            algorithm=algorithm,
             key_id=key_id,
         )
 
@@ -297,21 +309,28 @@ class SignedDecisionPackageV1(ContractModel):
         expected_key_id: Optional[str] = None,
         at: Optional[datetime] = None,
     ) -> bool:
-        if len(key) < 32:
-            return False
         if expected_key_id is not None and self.key_id != expected_key_id:
             return False
         current = _require_aware(at or _utc_now(), "at")
         if current < self.package.created_at or current >= self.package.expires_at:
             return False
-        expected = (
-            base64.urlsafe_b64encode(
-                hmac.new(key, canonical_json(self.package), hashlib.sha256).digest()
-            )
-            .rstrip(b"=")
-            .decode("ascii")
-        )
-        return hmac.compare_digest(self.signature, expected)
+        message = canonical_json(self.package)
+        sig_bytes = base64.urlsafe_b64decode(self.signature + "==")
+        if self.algorithm == "Ed25519":
+            if len(key) != 32:
+                return False
+            try:
+                public_key = Ed25519PublicKey.from_public_bytes(key)
+                public_key.verify(sig_bytes, message)
+                return True
+            except (InvalidSignature, ValueError):
+                return False
+        elif self.algorithm == "HMAC-SHA256":
+            if len(key) < 32:
+                return False
+            expected = hmac.new(key, message, hashlib.sha256).digest()
+            return hmac.compare_digest(sig_bytes, expected)
+        return False
 
 
 class DecisionPackageCloudEventV1(ContractModel):
@@ -388,6 +407,7 @@ def build_decision_package(
     agent_promotion_attestation: Optional[dict[str, Any]] = None,
     causation_id: Optional[str] = None,
     idempotency_id: Optional[str] = None,
+    algorithm: str = "Ed25519",
 ) -> SignedDecisionPackageV1:
     """Translate one surviving cycle into the owned, signed decision contract."""
     created_at = _utc_now()
@@ -511,7 +531,7 @@ def build_decision_package(
         evidence_sources=evidence_sources,
         evidence_refs=evidence_refs,
     )
-    return SignedDecisionPackageV1.sign(package, signing_key, signing_key_id)
+    return SignedDecisionPackageV1.sign(package, signing_key, signing_key_id, algorithm=algorithm)
 
 
 def decision_package_schema() -> dict[str, Any]:

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 
 from gcl.domain.contracts import (
@@ -30,11 +31,15 @@ from gcl.domain.decision_package import (
 from gcl.domain.enums import ConstraintSource, ConstraintType, Verdict
 
 
-KEY = b"a-secure-test-key-with-at-least-thirty-two-bytes"
+HMAC_KEY = b"a-secure-test-key-with-at-least-thirty-two-bytes"
+ED25519_SEED = b"ed25519-test-seed-exactly-32byte"
+ED25519_PUBLIC = Ed25519PrivateKey.from_private_bytes(ED25519_SEED).public_key().public_bytes_raw()
+KEY = ED25519_SEED
 
 
 def _signed_package(
     agent_promotion_attestation: dict | None = None,
+    algorithm: str = "Ed25519",
 ) -> SignedDecisionPackageV1:
     evidence = Evidence(
         metric="latency_ms",
@@ -95,9 +100,10 @@ def _signed_package(
         tenant="tenant-a",
         zone="us-central",
         ttl_seconds=300,
-        signing_key=KEY,
+        signing_key=HMAC_KEY if algorithm == "HMAC-SHA256" else KEY,
         signing_key_id="test-key-v1",
         agent_promotion_attestation=agent_promotion_attestation,
+        algorithm=algorithm,
     )
 
 
@@ -143,15 +149,25 @@ class TestDecisionPackageV1:
         assert canonical_json(signed.package) == canonical_json(signed_again.package)
         assert signed.digest == sha256_ref(signed.package)
         assert signed.signature == signed_again.signature
+        assert signed.algorithm == "Ed25519"
         assert signed.verify(
-            KEY,
+            ED25519_PUBLIC,
+            expected_key_id="test-key-v1",
+            at=signed.package.created_at + timedelta(seconds=1),
+        )
+
+    def test_hmac_signing_and_verification_still_work(self):
+        signed = _signed_package(algorithm="HMAC-SHA256")
+        assert signed.algorithm == "HMAC-SHA256"
+        assert signed.verify(
+            HMAC_KEY,
             expected_key_id="test-key-v1",
             at=signed.package.created_at + timedelta(seconds=1),
         )
 
     def test_expired_package_does_not_verify(self):
         signed = _signed_package()
-        assert not signed.verify(KEY, at=signed.package.expires_at)
+        assert not signed.verify(ED25519_PUBLIC, at=signed.package.expires_at)
 
     def test_tampering_is_rejected_before_signature_verification(self):
         signed = _signed_package()
