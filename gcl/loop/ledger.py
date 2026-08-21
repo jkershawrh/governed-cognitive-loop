@@ -145,3 +145,12 @@ class LedgerClient:
 
     def get_memory_entries(self) -> list[dict]:
         return list(self._memory)
+
+    def clear_memory(self) -> None:
+        """Drop buffered in-memory entries.
+
+        Used by the development /reset endpoint. Exposed as a method so the
+        API layer does not reach into private state to erase decision
+        records.
+        """
+        self._memory.clear()
