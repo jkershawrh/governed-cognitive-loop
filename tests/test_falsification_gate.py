@@ -11,7 +11,7 @@ from gcl.domain.contracts import (
     Trajectory,
     TrajectoryPoint,
 )
-from gcl.domain.enums import ConstraintSource, ConstraintType, Verdict
+from gcl.domain.enums import AdversaryStatus, ConstraintSource, ConstraintType, Verdict
 from gcl.falsification.gate import FalsificationGate
 from tests.conftest import make_constraint, make_trajectory
 
@@ -150,13 +150,16 @@ class TestFalsificationGate:
         trajectory = make_trajectory(confidence=0.8)
         evidence = [Evidence(metric="latency_ms", value=6000.0)]
 
-        gate._adversary.probe = AsyncMock(return_value="Cascading failure risk detected.")
+        gate._adversary.probe = AsyncMock(
+            return_value=("Cascading failure risk detected.", AdversaryStatus.OBJECTED)
+        )
 
         with patch("gcl.falsification.gate.get_force_rules", return_value=False):
             result = await gate.falsify(action, trajectory, [], evidence)
 
         assert result.verdict == Verdict.FAILS
         assert result.failed_check == "llm_adversarial_probe"
+        assert result.adversary_status == AdversaryStatus.OBJECTED
 
     @pytest.mark.asyncio
     async def test_compliance_rejects_scale(self, gate):

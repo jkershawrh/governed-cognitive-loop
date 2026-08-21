@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Optional, Tuple
 
 from gcl.domain.contracts import ActionStep
+from gcl.domain.enums import AdversaryStatus
 from gcl.inference.client import infer
 
 _SYSTEM_PROMPT = (
@@ -19,7 +20,15 @@ _SYSTEM_PROMPT = (
 
 
 class LLMAdversary:
-    async def probe(self, action_step: ActionStep, context: dict) -> Optional[str]:
+    async def probe(
+        self, action_step: ActionStep, context: dict
+    ) -> Tuple[Optional[str], AdversaryStatus]:
+        """Return (objection, status).
+
+        The status distinguishes "ran and found nothing" from "never ran",
+        which a bare None could not express. Callers record it so a SURVIVES
+        verdict states which gates actually executed.
+        """
         prompt = (
             f"Proposed action: {action_step.action_type}\n"
             f"Parameters: {json.dumps(action_step.parameters)}\n"
@@ -30,18 +39,21 @@ class LLMAdversary:
 
         result = await infer(prompt, system=_SYSTEM_PROMPT)
         if result is None:
-            return None
+            # No inference endpoint configured, or rules mode short-circuited
+            # the call. Either way the adversary did not examine the action.
+            return None, AdversaryStatus.UNAVAILABLE
 
         try:
             raw = result.text.strip()
             start = raw.find("{")
             end = raw.rfind("}")
             if start == -1 or end == -1:
-                return None
+                return None, AdversaryStatus.UNAVAILABLE
             data = json.loads(raw[start : end + 1])
             if data.get("fails"):
-                return data.get("reason", "LLM adversary found a flaw.")
+                reason = data.get("reason", "LLM adversary found a flaw.")
+                return reason, AdversaryStatus.OBJECTED
         except (json.JSONDecodeError, ValueError):
-            pass
+            return None, AdversaryStatus.UNAVAILABLE
 
-        return None
+        return None, AdversaryStatus.PROBED

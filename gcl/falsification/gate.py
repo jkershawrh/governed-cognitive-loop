@@ -9,7 +9,7 @@ from gcl.domain.contracts import (
     FalsificationResult,
     Trajectory,
 )
-from gcl.domain.enums import Verdict
+from gcl.domain.enums import AdversaryStatus, Verdict
 from gcl.falsification.checks import (
     check_capacity_available,
     check_compliance_action_valid,
@@ -45,6 +45,7 @@ class FalsificationGate:
                 failed_check="capacity_overcommit",
                 reasoning=capacity_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         magnitude_fail = check_scale_magnitude_reasonable(action_step, evidence, constraints)
@@ -55,6 +56,7 @@ class FalsificationGate:
                 failed_check="scale_magnitude_unreasonable",
                 reasoning=magnitude_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         warmup_fail = check_warmup_time_realistic(action_step, evidence)
@@ -65,6 +67,7 @@ class FalsificationGate:
                 failed_check="warmup_time_unrealistic",
                 reasoning=warmup_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         confidence_fail = check_prediction_confidence(action_step, trajectory)
@@ -75,6 +78,7 @@ class FalsificationGate:
                 failed_check="low_prediction_confidence",
                 reasoning=confidence_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         compliance_fail = check_compliance_action_valid(action_step, evidence, constraints)
@@ -85,6 +89,7 @@ class FalsificationGate:
                 failed_check="compliance_action_invalid",
                 reasoning=compliance_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         shed_fail = check_shed_load_bounded(action_step, evidence, constraints)
@@ -95,6 +100,7 @@ class FalsificationGate:
                 failed_check="shed_load_unbounded",
                 reasoning=shed_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
         migrate_fail = check_migration_target_available(action_step, evidence, constraints)
@@ -105,15 +111,19 @@ class FalsificationGate:
                 failed_check="migration_target_missing",
                 reasoning=migrate_fail,
                 evidence_ids=evidence_ids,
+                adversary_status=AdversaryStatus.NOT_REACHED,
             )
 
+        adversary_status = AdversaryStatus.SKIPPED_RULES_MODE
         if not get_force_rules():
             context = {
                 "trajectory_confidence": trajectory.confidence,
                 "constraints_count": len(constraints),
                 "evidence_count": len(evidence),
             }
-            adversary_reason = await self._adversary.probe(action_step, context)
+            adversary_reason, adversary_status = await self._adversary.probe(
+                action_step, context
+            )
             if adversary_reason is not None:
                 return FalsificationResult(
                     action_id=action_id,
@@ -121,11 +131,24 @@ class FalsificationGate:
                     failed_check="llm_adversarial_probe",
                     reasoning=adversary_reason,
                     evidence_ids=evidence_ids,
+                    adversary_status=adversary_status,
                 )
 
         return FalsificationResult(
             action_id=action_id,
             verdict=Verdict.SURVIVES,
-            reasoning="All deterministic checks passed.",
+            reasoning=_survival_reasoning(adversary_status),
             evidence_ids=evidence_ids,
+            adversary_status=adversary_status,
         )
+
+
+def _survival_reasoning(status: AdversaryStatus) -> str:
+    """Say which gates ran, so the record is not silently ambiguous."""
+    if status == AdversaryStatus.PROBED:
+        return "All deterministic checks passed and the LLM adversary raised no objection."
+    if status == AdversaryStatus.SKIPPED_RULES_MODE:
+        return "All deterministic checks passed. LLM adversary skipped: deterministic rules mode."
+    if status == AdversaryStatus.UNAVAILABLE:
+        return "All deterministic checks passed. LLM adversary unavailable: no usable inference response."
+    return "All deterministic checks passed."

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,6 +27,9 @@ from gcl.scenario.engine import (
     get_active_scenario,
     seed_scenario,
 )
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -164,9 +168,16 @@ async def get_decision_package_cloud_event_schema() -> dict:
 
 @router.post("/reset")
 async def reset() -> dict:
+    """Clear cycle history, in-memory ledger entries, and scenario state.
+
+    Destructive, so it carries the same production gate as the other
+    development compatibility endpoints: erasing the decision record is not
+    something a production instance should offer over HTTP.
+    """
+    _require_non_production_compatibility("/api/v1/reset")
     global _ledger, _driver, _cycles
     _cycles.clear()
-    _ledger._memory.clear()
+    _ledger.clear_memory()
     clear_scenario()
     return {"status": "reset"}
 
@@ -178,6 +189,13 @@ class ScenarioSeedRequest(BaseModel):
 
 @router.post("/scenario/seed")
 async def seed_scenario_endpoint(request: ScenarioSeedRequest) -> dict:
+    """Seed synthetic signal data for a named scenario.
+
+    Gated for the same reason as /reset: injecting synthetic state into a
+    live instance would contaminate the decision record it is meant to
+    produce from real DeepField evidence.
+    """
+    _require_non_production_compatibility("/api/v1/scenario/seed")
     engine = seed_scenario(request.scenario, request.seed)
     return engine.metadata()
 
@@ -236,24 +254,31 @@ async def modelplane_status() -> dict:
             f"Bearer {_generate_fleet_token(settings.fleet_token)}"
         )
 
+    # A fleet controller that is unreachable, unauthorized or erroring must not
+    # be indistinguishable from one reporting zero clusters. Failures are
+    # reported to the caller and logged rather than swallowed.
     result: dict = {"clusters": [], "deployments": []}
+    errors: list[str] = []
     async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            r = await client.get(
-                f"{fleet_url}/api/v1/modelplane/clusters", headers=headers
-            )
-            if r.status_code == 200:
-                result["clusters"] = r.json()
-        except Exception:
-            pass
-        try:
-            r = await client.get(
-                f"{fleet_url}/api/v1/modelplane/deployments", headers=headers
-            )
-            if r.status_code == 200:
-                result["deployments"] = r.json()
-        except Exception:
-            pass
+        for key, path in (
+            ("clusters", "/api/v1/modelplane/clusters"),
+            ("deployments", "/api/v1/modelplane/deployments"),
+        ):
+            try:
+                response = await client.get(f"{fleet_url}{path}", headers=headers)
+            except httpx.HTTPError as exc:
+                message = f"{key}: request failed: {exc.__class__.__name__}"
+                logger.warning("modelplane status fetch failed: %s", message)
+                errors.append(message)
+                continue
+            if response.status_code != 200:
+                message = f"{key}: fleet returned {response.status_code}"
+                logger.warning("modelplane status fetch failed: %s", message)
+                errors.append(message)
+                continue
+            result[key] = response.json()
+    if errors:
+        result["errors"] = errors
     return result
 
 

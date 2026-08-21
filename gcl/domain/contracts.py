@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from gcl.domain.enums import ConstraintSource, ConstraintType, Verdict
+from gcl.domain.enums import AdversaryStatus, ConstraintSource, ConstraintType, Verdict
 
 
 class Evidence(BaseModel):
@@ -111,6 +111,15 @@ class FalsificationResult(BaseModel):
     failed_check: Optional[str] = None
     reasoning: str
     evidence_ids: list[UUID] = Field(default_factory=list)
+    adversary_status: AdversaryStatus = AdversaryStatus.NOT_REACHED
+    """Whether the LLM adversarial probe actually ran.
+
+    A SURVIVES verdict previously read the same whether the adversary
+    examined the action and found nothing, or never executed because rules
+    mode was forced or no inference endpoint was configured. An auditor
+    reading the record months later could not tell which gates ran, so the
+    outcome is recorded explicitly rather than inferred from silence.
+    """
 
 
 class LoopCycle(BaseModel):

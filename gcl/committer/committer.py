@@ -65,6 +65,7 @@ class Committer:
                 {
                     "action_type": action_step.action_type,
                     "falsification_verdict": falsification.verdict.value,
+                    "adversary_status": falsification.adversary_status.value,
                     "decision_package_digest": decision_package.digest,
                     "decision_package_id": str(decision_package.package.package_id),
                     "proposal_status": proposal_status,
@@ -85,6 +86,7 @@ class Committer:
                     "action_type": action_step.action_type,
                     "parameters": action_step.parameters,
                     "falsification_verdict": falsification.verdict.value,
+                    "adversary_status": falsification.adversary_status.value,
                     "failed_check": falsification.failed_check,
                     "reasoning": falsification.reasoning,
                 },
