@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from gcl.domain.contracts import Constraint, Evidence
 from gcl.domain.enums import ConstraintSource, ConstraintType

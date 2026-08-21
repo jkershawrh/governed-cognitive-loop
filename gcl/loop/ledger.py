@@ -38,7 +38,7 @@ class LedgerClient:
         )
         input_hash = hashlib.sha256(content_json.encode("utf-8")).hexdigest()
         idempotency_key = hashlib.sha256(
-            f"{entry_type}\0{correlation_id}\0{input_hash}".encode("utf-8")
+            f"{entry_type}\0{correlation_id}\0{input_hash}".encode()
         ).hexdigest()
 
         mem_entry = {
