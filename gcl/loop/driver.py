@@ -260,6 +260,7 @@ class LoopDriver:
                     ),
                     signing_key=decision_signing_key(settings),
                     signing_key_id=settings.decision_signing_key_id,
+                    algorithm=settings.decision_signing_algorithm,
                     agent_promotion_attestation=agent_promotion_attestation,
                     causation_id=causation_id,
                     idempotency_id=idempotency_id,

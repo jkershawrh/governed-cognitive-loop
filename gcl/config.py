@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     proposer_bearer_token: str = ""
     decision_signing_key: str = ""
     decision_signing_key_id: str = "gcl-decision-v1"
+    decision_signing_algorithm: str = "Ed25519"
     decision_package_ttl_seconds: int = Field(default=300, gt=0, le=3600)
     decision_event_source: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
     proposer_workload_identity: str = "spiffe://llm-d.ai/ns/gcl/sa/controller"
@@ -87,8 +88,14 @@ def decision_signing_key(settings: Settings) -> bytes:
     else:
         key = encoded.encode("utf-8")
     if not key and settings.runtime_mode == "standalone-test":
-        key = b"standalone-test-decision-signing-key-not-for-production"
-    if len(key) < 32:
+        if settings.decision_signing_algorithm == "Ed25519":
+            key = b"standalone-test-ed25519-32bytes!"
+        else:
+            key = b"standalone-test-decision-signing-key-not-for-production"
+    if settings.decision_signing_algorithm == "Ed25519":
+        if len(key) != 32:
+            raise ValueError("GCL_DECISION_SIGNING_KEY must be exactly 32 bytes for Ed25519")
+    elif len(key) < 32:
         raise ValueError("GCL_DECISION_SIGNING_KEY must contain at least 32 bytes")
     return key
 
