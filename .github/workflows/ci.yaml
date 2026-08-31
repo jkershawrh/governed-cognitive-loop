@@ -96,7 +96,9 @@ jobs:
       - name: Build and start fleet consumer
         working-directory: fleet-llm-d
         env:
-          GCL_DECISION_SIGNING_KEY: a-secure-test-key-with-at-least-thirty-two-bytes
+          # Public half of tests.test_decision_package.ED25519_SEED.
+          # The fleet consumer must never receive GCL's private signing seed.
+          GCL_DECISION_SIGNING_KEY: base64:NdnGV3AF9EnKg3rj0LbeC+5J7/dtFP3OarSuHhg9YlQ=
           GCL_DECISION_SIGNING_KEY_ID: test-key-v1
         run: |
           go build -o fleet-controller ./cmd/fleet-controller
