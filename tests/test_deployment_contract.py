@@ -26,3 +26,8 @@ def test_process_local_safety_state_uses_one_worker_and_one_replica():
     assert deployment["spec"]["replicas"] == 1
     assert deployment["spec"].get("strategy", {}).get("type") == "Recreate", \
         "Deployment must use Recreate strategy to prevent overlapping process-local state"
+
+
+def test_containerfile_does_not_reference_removed_fixtures():
+    containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
+    assert "COPY fixtures/ fixtures/" not in containerfile

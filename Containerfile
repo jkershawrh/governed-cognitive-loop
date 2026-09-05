@@ -17,7 +17,6 @@ RUN pip install --no-cache-dir .
 
 COPY gcl/ gcl/
 COPY config/ config/
-COPY fixtures/ fixtures/
 COPY --from=frontend-build /build/dist frontend/dist/
 
 RUN useradd --uid 1001 --no-create-home appuser \
