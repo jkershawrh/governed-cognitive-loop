@@ -23,6 +23,34 @@ logger = logging.getLogger(__name__)
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
+def stratified_sample(
+    decisions: List[tuple[Dict[str, Any], str]], sample_size: int,
+) -> List[tuple[Dict[str, Any], str]]:
+    """Sample judgment and mechanical decisions without dedup crowding out both."""
+    if sample_size <= 0 or not decisions:
+        return []
+
+    judgment = [item for item in decisions if item[0].get("outcome") != "dedupe"]
+    mechanical = [item for item in decisions if item[0].get("outcome") == "dedupe"]
+    if not judgment or not mechanical:
+        return random.sample(decisions, min(sample_size, len(decisions)))
+
+    judgment_quota = min(len(judgment), max(1, (sample_size + 1) // 2))
+    mechanical_quota = min(len(mechanical), sample_size - judgment_quota)
+    remaining = sample_size - judgment_quota - mechanical_quota
+    if remaining:
+        judgment_room = len(judgment) - judgment_quota
+        extra_judgment = min(remaining, judgment_room)
+        judgment_quota += extra_judgment
+        mechanical_quota += min(remaining - extra_judgment,
+                                len(mechanical) - mechanical_quota)
+
+    return (
+        random.sample(judgment, judgment_quota)
+        + random.sample(mechanical, mechanical_quota)
+    )
+
+
 def audit_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     """Run deterministic falsification checks on a single decision.
 
@@ -170,7 +198,7 @@ class DecisionSampler:
 
         sample_size = max(1, int(len(auditable_with_corr) * self._sample_rate))
         sample_size = min(sample_size, self._max_verdicts_per_poll)
-        sampled = random.sample(auditable_with_corr, min(sample_size, len(auditable_with_corr)))
+        sampled = stratified_sample(auditable_with_corr, sample_size)
 
         verdicts = []
         for d, corr_id in sampled:
@@ -249,6 +277,10 @@ class DecisionSampler:
         probed = sum(1 for r in self._audit_results if r.get("probe_result") is not None)
         overridden = sum(1 for r in self._audit_results
                          if (r.get("probe_result") or {}).get("correct_drop") is True)
+        judgment = sum(
+            1 for r in self._audit_results if r.get("original_outcome") != "dedupe"
+        )
+        mechanical = total - judgment
         return {
             "total_audited": total,
             "survives": survives,
@@ -256,5 +288,7 @@ class DecisionSampler:
             "disagreement_rate": round(fails / max(1, total), 3),
             "probed": probed,
             "llm_overrides": overridden,
+            "judgment_audited": judgment,
+            "mechanical_audited": mechanical,
             "last_seen_ts": self._last_seen_ts,
         }

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from gcl.adapter.decision_event_adapter import decision_record_to_evidence
 from gcl.domain.contracts import Evidence
-from gcl.loop.decision_sampler import DecisionSampler
+from gcl.loop.decision_sampler import DecisionSampler, stratified_sample
 
 
 def _make_decision(subject_type="pod_crashloop", severity="high", outcome="drop",
@@ -106,6 +106,22 @@ class TestSamplingLogic:
         ev1 = decision_record_to_evidence(r1)
         ev2 = decision_record_to_evidence(r2)
         assert len(ev1) + len(ev2) == 2
+
+    def test_dedup_volume_does_not_crowd_out_judgment_decisions(self):
+        decisions = [
+            (_make_decision(outcome="dedupe", subject_id=f"dedupe-{i}"), "corr")
+            for i in range(100)
+        ] + [
+            (_make_decision(outcome="suppress", subject_id=f"judgment-{i}"), "corr")
+            for i in range(3)
+        ]
+
+        sampled = stratified_sample(decisions, sample_size=10)
+
+        outcomes = [decision["outcome"] for decision, _ in sampled]
+        assert len(sampled) == 10
+        assert outcomes.count("suppress") == 3
+        assert outcomes.count("dedupe") == 7
 
 
 class TestVerdictSchema:
