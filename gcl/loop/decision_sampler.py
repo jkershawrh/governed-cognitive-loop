@@ -183,8 +183,7 @@ class DecisionSampler:
                         v["verdict"] = "SURVIVES"
                         v["reason"] = f"LLM probe overrode deterministic FAIL: {probe['reason']}"
             verdicts.append(v)
-            if v["verdict"] == "FAILS":
-                await self._write_verdict(v, corr_id)
+            await self._write_verdict(v, corr_id)
 
         self._audit_results.extend(verdicts)
         if len(self._audit_results) > 1000:

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from gcl.adapter.decision_event_adapter import decision_record_to_evidence
 from gcl.domain.contracts import Evidence
+from gcl.loop.decision_sampler import DecisionSampler
 
 
 def _make_decision(subject_type="pod_crashloop", severity="high", outcome="drop",
@@ -136,3 +137,41 @@ class TestVerdictSchema:
         }
         assert verdict["verdict"] == "FAILS"
         assert "severity" in verdict["checks_failed"]
+
+
+class TestVerdictPersistence:
+    """Every sampled result is durable so consumers receive a denominator."""
+
+    @pytest.mark.asyncio
+    async def test_persists_survives_and_fails(self):
+        sampler = DecisionSampler(
+            ledger_url="https://ledger.example.test",
+            sample_rate=1.0,
+            max_verdicts_per_poll=10,
+        )
+        sampler._fetch_new_entries = AsyncMock(return_value=[
+            {
+                "correlation_id": "corr-1",
+                "content": _make_record([
+                    _make_decision(
+                        severity="info", outcome="drop", subject_id="survives"
+                    ),
+                    _make_decision(
+                        severity="high", outcome="drop", subject_id="fails"
+                    ),
+                ]),
+            }
+        ])
+        sampler._write_verdict = AsyncMock()
+
+        verdicts = await sampler.poll_and_audit()
+
+        assert {verdict["verdict"] for verdict in verdicts} == {
+            "SURVIVES",
+            "FAILS",
+        }
+        assert sampler._write_verdict.await_count == 2
+        persisted = {
+            call.args[0]["verdict"] for call in sampler._write_verdict.await_args_list
+        }
+        assert persisted == {"SURVIVES", "FAILS"}
