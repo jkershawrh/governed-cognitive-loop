@@ -52,8 +52,18 @@ def judge_drop(decision: dict, *, domain: str) -> dict:
     }
 
 
-def audit(ledger_url: str, token: str) -> int:
-    entries = _get(ledger_url, token, "decision.record")
+def audit(ledger_url: str, token: str, window_minutes: int = 60) -> int:
+    """Judge drop decisions recorded in the last ``window_minutes``.
+
+    The ledger accumulates millions of decision.records; an unwindowed
+    query pulls the gateway's full-content cap and times out before any
+    judgment runs. The window bounds the read; idempotency keys make
+    overlapping windows safe to re-judge.
+    """
+    import time
+
+    from_ts = int(time.time() * 1000) - window_minutes * 60 * 1000
+    entries = _get(ledger_url, token, "decision.record", from_ts_ms=from_ts)
     written = 0
     for entry in entries:
         record = json.loads(entry["content"]) if isinstance(entry["content"], str) else entry["content"]
@@ -66,8 +76,14 @@ def audit(ledger_url: str, token: str) -> int:
     return written
 
 
-def _get(ledger_url: str, token: str, entry_type: str) -> list[dict]:
-    query = urllib.parse.urlencode({"entry_type": entry_type})
+def _get(
+    ledger_url: str, token: str, entry_type: str,
+    from_ts_ms: int | None = None,
+) -> list[dict]:
+    params: dict[str, str] = {"entry_type": entry_type}
+    if from_ts_ms is not None:
+        params["from_ts"] = str(from_ts_ms)
+    query = urllib.parse.urlencode(params)
     request = urllib.request.Request(
         f"{ledger_url.rstrip('/')}/api/entries?{query}",
         headers={"Authorization": f"Bearer {token}"},
@@ -110,8 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ledger-url", required=True)
     parser.add_argument("--token", required=True)
+    parser.add_argument(
+        "--window-minutes", type=int, default=60,
+        help="Judge decisions recorded in the last N minutes (default: 60)",
+    )
     args = parser.parse_args(argv)
-    written = audit(args.ledger_url, args.token)
+    written = audit(args.ledger_url, args.token, window_minutes=args.window_minutes)
     print(written)
     return 0
 
