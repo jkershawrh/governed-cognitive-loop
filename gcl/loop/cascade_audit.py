@@ -15,6 +15,12 @@ import urllib.request
 _DROP_OUTCOMES = {"drop", "suppress", "dedupe"}
 _DANGEROUS = {"medium", "high", "critical"}
 
+# The ledger gateway currently ignores page_size and returns its
+# full-content cap; when it starts honoring the parameter (backward-
+# compatibly), this explicit value keeps the audit's throughput
+# unchanged: the full window of decisions, not a 100-entry sample.
+_LEDGER_PAGE_SIZE = 10000
+
 
 def judge_drop(decision: dict, *, domain: str) -> dict:
     checks_passed: list[str] = []
@@ -63,7 +69,10 @@ def audit(ledger_url: str, token: str, window_minutes: int = 60) -> int:
     import time
 
     from_ts = int(time.time() * 1000) - window_minutes * 60 * 1000
-    entries = _get(ledger_url, token, "decision.record", from_ts_ms=from_ts)
+    entries = _get(
+        ledger_url, token, "decision.record",
+        from_ts_ms=from_ts, page_size=_LEDGER_PAGE_SIZE,
+    )
     written = 0
     for entry in entries:
         record = json.loads(entry["content"]) if isinstance(entry["content"], str) else entry["content"]
@@ -79,8 +88,9 @@ def audit(ledger_url: str, token: str, window_minutes: int = 60) -> int:
 def _get(
     ledger_url: str, token: str, entry_type: str,
     from_ts_ms: int | None = None,
+    page_size: int = 100,
 ) -> list[dict]:
-    params: dict[str, str] = {"entry_type": entry_type}
+    params: dict[str, str] = {"entry_type": entry_type, "page_size": str(page_size)}
     if from_ts_ms is not None:
         params["from_ts"] = str(from_ts_ms)
     query = urllib.parse.urlencode(params)

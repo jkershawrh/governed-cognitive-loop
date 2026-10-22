@@ -63,5 +63,10 @@ def test_audit_windows_decision_query(monkeypatch):
     url = opener.call_args[0][0].full_url
     after = int(time.time() * 1000)
     assert "from_ts=" in url, "audit must window its decision query"
+    assert "page_size=10000" in url, (
+        "audit must request its full intended page size — the gateway "
+        "will honor page_size once fixed, and a 100-entry sample would "
+        "silently starve the audit"
+    )
     from_ts = int(url.split("from_ts=")[1].split("&")[0])
     assert before - 30 * 60 * 1000 <= from_ts <= after - 30 * 60 * 1000 + 2000
