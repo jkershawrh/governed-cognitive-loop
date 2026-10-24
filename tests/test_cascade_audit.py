@@ -1,9 +1,80 @@
-"""The cascade reader fails a dangerous drop and survives an info drop."""
+"""The cascade reader fails a dangerous judgment-call drop and survives a dedupe.
+
+Live finding on infra01 (2026-10-23): the verified_repeat_update profile
+made medium the designed dedup band (identity admission requires medium),
+so a severity check that fails medium dedupes produced 100% FAILS verdicts
+on every dedupe decision — pure policy noise that drowned real signals.
+The corrected policy (matching gcl.loop.decision_sampler.audit_decision):
+dedupe is deterministic content-hash matching — the first occurrence is
+always delivered, so folding repeats is correct regardless of severity.
+Only judgment-call drops (suppress/drop) are flagged, at high severity or
+above. Confidence below 0.8 fails for every outcome.
+"""
 
 from gcl.loop.cascade_audit import judge_drop
 
 
-def test_medium_suppress_fails():
+def test_medium_dedupe_survives():
+    """The live bug case: medium dedupe at full confidence must survive.
+
+    On infra01 every one of these was failed with 'medium dedupe failed
+    severity' while the engine was working exactly as designed.
+    """
+    verdict = judge_drop(
+        {
+            "subject_id": "case-dedupe",
+            "subject_type": "event_claimmisbound",
+            "severity": "medium",
+            "outcome": "dedupe",
+            "agent": "deduplicate",
+            "confidence": 1.0,
+        },
+        domain="k8s",
+    )
+    assert verdict["verdict"] == "SURVIVES"
+    assert "severity" in verdict["checks_passed"]
+    assert verdict["checks_failed"] == []
+
+
+def test_critical_dedupe_survives_severity_check():
+    """Dedupe is exempt from severity at ANY level: the first occurrence
+    of the content was delivered, so folding a repeat cannot lose a signal."""
+    verdict = judge_drop(
+        {
+            "subject_id": "case-critical-dedupe",
+            "subject_type": "event_backoff",
+            "severity": "critical",
+            "outcome": "dedupe",
+            "agent": "deduplicate",
+            "confidence": 1.0,
+        },
+        domain="k8s",
+    )
+    assert "severity" in verdict["checks_passed"]
+    # Verdict may still FAIL on other checks, but never on severity.
+
+
+def test_high_suppress_fails_severity():
+    """A judgment-call suppression at high severity is a genuine violation:
+    the engine's fail-open gate should have prevented it."""
+    verdict = judge_drop(
+        {
+            "subject_id": "case-high-suppress",
+            "subject_type": "pod_failed",
+            "severity": "high",
+            "outcome": "suppress",
+            "agent": "suppress_pod_failed_repeat",
+            "confidence": 1.0,
+        },
+        domain="k8s",
+    )
+    assert verdict["verdict"] == "FAILS"
+    assert "severity" in verdict["checks_failed"]
+
+
+def test_medium_suppress_low_confidence_fails():
+    """Medium suppressions by qualified agents are designed behavior, so
+    severity passes; this one fails on confidence alone."""
     verdict = judge_drop(
         {
             "subject_id": "case-1",
@@ -16,7 +87,8 @@ def test_medium_suppress_fails():
         domain="department-a",
     )
     assert verdict["verdict"] == "FAILS"
-    assert "severity" in verdict["checks_failed"]
+    assert "confidence" in verdict["checks_failed"]
+    assert "severity" not in verdict["checks_failed"]
 
 
 def test_info_drop_survives():

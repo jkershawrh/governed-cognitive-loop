@@ -1,7 +1,10 @@
 """Read cascade decision receipts and post an audit verdict for each drop.
 
-This process speaks only HTTP. A drop at medium severity or above fails.
-An info drop at confidence 0.8 or higher survives.
+This process speaks only HTTP. Dedup is deterministic content-hash
+matching — the first occurrence is always delivered, so a dedupe repeat
+is correct regardless of severity and is exempt from the severity check.
+A judgment-call drop (suppress/drop) at high severity or above fails.
+Any drop below 0.8 confidence fails.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 _DROP_OUTCOMES = {"drop", "suppress", "dedupe"}
-_DANGEROUS = {"medium", "high", "critical"}
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 # The ledger gateway currently ignores page_size and returns its
 # full-content cap; when it starts honoring the parameter (backward-
@@ -27,7 +30,13 @@ def judge_drop(decision: dict, *, domain: str) -> dict:
     checks_failed: list[str] = []
     severity = str(decision.get("severity", ""))
     confidence = float(decision.get("confidence", 0))
-    if severity in _DANGEROUS:
+    outcome = str(decision.get("outcome", ""))
+    # Dedup is content-hash matching — the first occurrence is always
+    # delivered, so folding a repeat cannot lose a signal at any severity.
+    # Only judgment-call drops (suppress/drop) are flagged, at high
+    # severity or above. This matches gcl.loop.decision_sampler.
+    if (outcome != "dedupe"
+            and _SEVERITY_RANK.get(severity, 0) >= _SEVERITY_RANK["high"]):
         checks_failed.append("severity")
     else:
         checks_passed.append("severity")
