@@ -1,0 +1,17 @@
+# GCL cascade audit — built from governed-cognitive-loop repo source.
+# The audit is pure stdlib (urllib/json/hashlib); no pip installs.
+# Build from the repo root so the script is the committed source:
+#   podman build -f deploy/audit-image/Containerfile -t cascade-audit:<sha> .
+#
+# DEPLOYMENT NOTE: on infra01 the cascade-audit CronJob mounts ConfigMap
+# `cascade-audit-script` at /audit (readOnly), which SHADOWS whatever the
+# image contains at that path. The ConfigMap is the actual script delivery
+# channel — updating the image alone changes nothing. To roll a new audit
+# policy: update the ConfigMap (oc create configmap cascade-audit-script
+# --from-file=cascade_audit.py=gcl/loop/cascade_audit.py --dry-run=client
+# -o yaml | oc apply -f -). The baked-in copy makes the image self-contained
+# for other environments where no ConfigMap mount exists.
+FROM registry.access.redhat.com/ubi9/python-311:latest
+COPY gcl/loop/cascade_audit.py /audit/cascade_audit.py
+USER 1001
+CMD ["python", "/audit/cascade_audit.py", "--help"]
